@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any
+from telegram import Update
+from telegram.constants import ParseMode, ChatAction
+from telegram.ext import ContextTypes
 
-from aiogram import Router, F, Bot
-from aiogram.types import Message, FSInputFile
-
+from src.bot.middlewares.auth import authorized_only
 from src.bot.ui.keyboards import get_cancel_keyboard, get_confirmation_keyboard
 from src.core.agent import agent, AgentResponse
 from src.core.permissions import permission_manager
@@ -15,23 +15,24 @@ from src.tools.base import ToolContext
 
 logger = logging.getLogger("faf_agent.bot.chat")
 
-chat_router = Router(name="chat_router")
 
-
-@chat_router.message(F.text & ~F.text.startswith("/"))
-async def handle_chat_message(message: Message, bot: Bot) -> None:
+@authorized_only
+async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Natural language agent handler with streaming status, media dispatch, and cancellation."""
-    chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else 0
-    prompt = message.text or ""
+    if not update.effective_message or not update.effective_chat:
+        return
 
-    # Send initial typing action & status indicator message
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id if update.effective_user else 0
+    prompt = update.effective_message.text or ""
+
+    # Send typing action
     try:
-        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
     except Exception:
         pass
 
-    status_msg = await message.answer(
+    status_msg = await update.effective_message.reply_text(
         "● faf-agent sedang menganalisis...",
         reply_markup=get_cancel_keyboard(),
     )
@@ -53,18 +54,19 @@ async def handle_chat_message(message: Message, bot: Bot) -> None:
             details=details,
         )
         kb = get_confirmation_keyboard(req_id)
-        confirm_msg = await message.answer(
-            f"**{title}**\n\n{details}\n\nApakah Anda menyetujui tindakan ini?",
-            reply_markup=kb,
-            parse_mode="Markdown",
-        )
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                f"**{title}**\n\n{details}\n\nApakah Anda menyetujui tindakan ini?",
+                reply_markup=kb,
+                parse_mode=ParseMode.MARKDOWN,
+            )
         try:
             approved = await future
             return approved
         except Exception:
             return False
 
-    context = ToolContext(
+    tool_context = ToolContext(
         chat_id=chat_id,
         user_id=user_id,
         message_id=status_msg.message_id,
@@ -74,7 +76,7 @@ async def handle_chat_message(message: Message, bot: Bot) -> None:
     )
 
     # Wrap agent execution in an active task so it can be cancelled via /cancel
-    task = asyncio.create_task(agent.run(user_message=prompt, context=context))
+    task = asyncio.create_task(agent.run(user_message=prompt, context=tool_context))
     agent._active_tasks[chat_id] = task
 
     try:
@@ -94,34 +96,35 @@ async def handle_chat_message(message: Message, bot: Bot) -> None:
             media_type = media.get("type", "photo")
             if file_path and os.path.exists(file_path):
                 try:
-                    input_file = FSInputFile(file_path)
-                    if media_type == "photo":
-                        await message.answer_photo(
-                            photo=input_file,
-                            caption=f"📷 Berkas media: `{os.path.basename(file_path)}`",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await message.answer_document(
-                            document=input_file,
-                            caption=f"📎 Berkas: `{os.path.basename(file_path)}`",
-                            parse_mode="Markdown",
-                        )
+                    with open(file_path, "rb") as f:
+                        if media_type == "photo":
+                            await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=f,
+                                caption=f"📷 Berkas media: `{os.path.basename(file_path)}`",
+                                parse_mode=ParseMode.MARKDOWN,
+                            )
+                        else:
+                            await context.bot.send_document(
+                                chat_id=chat_id,
+                                document=f,
+                                caption=f"📎 Berkas: `{os.path.basename(file_path)}`",
+                                parse_mode=ParseMode.MARKDOWN,
+                            )
                 except Exception as e:
                     logger.error(f"Failed to send media file {file_path}: {e}")
 
     # 2. Update status message or send final text
     final_text = response.text or "(Selesai tanpa tanggapan teks)"
 
-    # Truncate if exceeding Telegram limit of 4096 characters
     if len(final_text) > 4000:
         final_text = final_text[:4000] + "\n\n...(respons dipotong karena batas panjang pesan)"
 
     try:
-        await status_msg.edit_text(final_text, reply_markup=None, parse_mode="Markdown")
+        await status_msg.edit_text(final_text, reply_markup=None, parse_mode=ParseMode.MARKDOWN)
     except Exception:
-        # Fallback if markdown parsing fails or other edit error
         try:
             await status_msg.edit_text(final_text, reply_markup=None)
         except Exception:
-            await message.answer(final_text)
+            if update.effective_message:
+                await update.effective_message.reply_text(final_text)

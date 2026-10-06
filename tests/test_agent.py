@@ -19,7 +19,7 @@ from src.tools.productivity import ProductivityControlTool
 from src.tools.media import MediaControlTool
 from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
-from src.bot.middlewares.auth import WhitelistAuthMiddleware
+from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
 # ---------------------------------------------------------------------------
@@ -388,32 +388,38 @@ async def test_auth_middleware_allowed_and_blocked():
     settings = Settings(ALLOWED_TELEGRAM_USER_IDS="1001, 1002")
     set_settings(settings)
 
-    middleware = WhitelistAuthMiddleware()
-    mock_handler = AsyncMock(return_value="OK")
+    assert is_user_authorized(1001) is True
+    assert is_user_authorized(1002) is True
+    assert is_user_authorized(9999) is False
+    assert is_user_authorized(None) is False
 
-    # Allowed user
-    allowed_user = MagicMock()
-    allowed_user.id = 1001
-    allowed_user.username = "authorized_admin"
+    # Test authorized_only decorator
+    mock_fn = AsyncMock(return_value="OK")
+    decorated_fn = authorized_only(mock_fn)
 
-    event = MagicMock()
-    data_allowed = {"event_from_user": allowed_user}
+    # Allowed update
+    update_allowed = MagicMock()
+    user_allowed = MagicMock()
+    user_allowed.id = 1001
+    user_allowed.username = "authorized_admin"
+    update_allowed.effective_user = user_allowed
 
-    result = await middleware(mock_handler, event, data_allowed)
-    assert result == "OK"
-    assert mock_handler.call_count == 1
+    context = MagicMock()
+    res_allowed = await decorated_fn(update_allowed, context)
+    assert res_allowed == "OK"
+    assert mock_fn.call_count == 1
 
-    # Disallowed user (should be dropped silently with None return)
-    mock_handler.reset_mock()
-    disallowed_user = MagicMock()
-    disallowed_user.id = 9999
-    disallowed_user.username = "attacker"
+    # Disallowed update (should return None silently without calling handler)
+    mock_fn.reset_mock()
+    update_blocked = MagicMock()
+    user_blocked = MagicMock()
+    user_blocked.id = 9999
+    user_blocked.username = "attacker"
+    update_blocked.effective_user = user_blocked
 
-    data_blocked = {"event_from_user": disallowed_user}
-    blocked_result = await middleware(mock_handler, event, data_blocked)
-
-    assert blocked_result is None
-    assert mock_handler.call_count == 0
+    res_blocked = await decorated_fn(update_blocked, context)
+    assert res_blocked is None
+    assert mock_fn.call_count == 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,39 +1,70 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
-
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
 
 from src.config import get_settings
-from src.bot.middlewares.auth import WhitelistAuthMiddleware
-from src.bot.handlers.commands import commands_router
-from src.bot.handlers.chat import chat_router
+from src.bot.handlers.commands import (
+    handle_start,
+    handle_help,
+    handle_device,
+    handle_battery,
+    handle_top,
+    handle_apps,
+    handle_wifi,
+    handle_ping,
+    handle_su_direct,
+    handle_cancel,
+    handle_clear,
+    handle_callback_query,
+)
+from src.bot.handlers.chat import handle_chat_message
 
 logger = logging.getLogger("faf_agent")
 
 
-def create_dispatcher() -> Dispatcher:
-    """Create and configure Aiogram Dispatcher with routers and middlewares."""
-    dp = Dispatcher()
+def create_application() -> Application:
+    """Create and configure python-telegram-bot Application instance."""
+    settings = get_settings()
 
-    # Register Whitelist Auth Middleware
-    auth_middleware = WhitelistAuthMiddleware()
-    dp.message.middleware(auth_middleware)
-    dp.callback_query.middleware(auth_middleware)
+    if not settings.telegram_bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN is not configured! Please set it in your .env file.")
+        sys.exit(1)
 
-    # Register Routers (order matters: commands first, then natural language chat)
-    dp.include_router(commands_router)
-    dp.include_router(chat_router)
+    app = ApplicationBuilder().token(settings.telegram_bot_token).build()
 
-    return dp
+    # Register Slash Command Handlers
+    app.add_handler(CommandHandler("start", handle_start))
+    app.add_handler(CommandHandler("help", handle_help))
+    app.add_handler(CommandHandler("device", handle_device))
+    app.add_handler(CommandHandler("battery", handle_battery))
+    app.add_handler(CommandHandler("top", handle_top))
+    app.add_handler(CommandHandler("apps", handle_apps))
+    app.add_handler(CommandHandler("wifi", handle_wifi))
+    app.add_handler(CommandHandler("ping", handle_ping))
+    app.add_handler(CommandHandler("su", handle_su_direct))
+    app.add_handler(CommandHandler("cancel", handle_cancel))
+    app.add_handler(CommandHandler("clear", handle_clear))
+
+    # Register Callback Query Handler (Inline buttons)
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
+
+    # Register Natural Language Chat Handler
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_chat_message))
+
+    return app
 
 
-async def start_bot() -> None:
-    """Initialize bot instance and begin long-polling."""
+def main() -> None:
+    """Synchronous entry point for running the bot."""
     settings = get_settings()
 
     logging.basicConfig(
@@ -41,35 +72,17 @@ async def start_bot() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    if not settings.telegram_bot_token:
-        logger.error(
-            "TELEGRAM_BOT_TOKEN is not configured! Please set it in your .env file."
-        )
-        sys.exit(1)
-
     if not settings.allowed_telegram_user_ids:
         logger.warning(
             "ALLOWED_TELEGRAM_USER_IDS is empty! All incoming messages will be rejected by default."
         )
 
-    logger.info("Initializing faf-agent Telegram Bot...")
-    bot = Bot(
-        token=settings.telegram_bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
-    )
-    dp = create_dispatcher()
+    logger.info("Initializing faf-agent Telegram Bot (Pure Python / Zero Maturin)...")
+    app = create_application()
 
     logger.info("Starting Telegram Bot polling loop...")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    finally:
-        await bot.session.close()
-
-
-def main() -> None:
-    """Synchronous entry point."""
-    try:
-        asyncio.run(start_bot())
+        app.run_polling()
     except (KeyboardInterrupt, SystemExit):
         logger.info("faf-agent stopped by user.")
 

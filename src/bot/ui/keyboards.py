@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def get_confirmation_keyboard(request_id: str) -> InlineKeyboardMarkup:
@@ -17,7 +17,7 @@ def get_confirmation_keyboard(request_id: str) -> InlineKeyboardMarkup:
             ),
         ]
     ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return InlineKeyboardMarkup(buttons)
 
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
@@ -30,4 +30,4 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
             )
         ]
     ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return InlineKeyboardMarkup(buttons)
