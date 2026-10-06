@@ -50,16 +50,28 @@ class ProcessManagerTool(BaseTool):
         if context.on_status_update:
             await context.on_status_update(f"● process_manager · {action}")
 
-        # 1. List Processes
+        # 1. List Processes (Format list ramah layar HP, tanpa tabel)
         if action == "list_processes":
             limit = kwargs.get("limit", 10)
             res = await bridge.execute_shell("ps -ef || ps -A", timeout=5)
             if res.success and res.stdout:
                 raw_lines = [l for l in res.stdout.splitlines() if l.strip()]
-                preview_lines = raw_lines[: limit + 1]
+                # Skip header
+                content_lines = raw_lines[1:] if len(raw_lines) > 1 else raw_lines
+                formatted_items = []
+                for line in content_lines[:limit]:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        pid = parts[1] if not parts[0].isdigit() else parts[0]
+                        cmd = parts[-1].split("/")[-1]
+                        formatted_items.append(f"• PID {pid}: {cmd}")
+                    else:
+                        formatted_items.append(f"• {line}")
+
+                output = "Daftar proses sistem:\n" + "\n".join(formatted_items)
                 return ToolResult(
                     success=True,
-                    output="\n".join(preview_lines),
+                    output=output,
                 )
             return ToolResult(
                 success=True,
@@ -94,7 +106,6 @@ class ProcessManagerTool(BaseTool):
                     success=False, output="", error=f"Proses dengan PID {target_pid} tidak ditemukan."
                 )
             except PermissionError:
-                # Fallback to root kill if permitted
                 if bridge.is_root_available():
                     res = await bridge.execute_shell(f"kill -{sig_num} {target_pid}", as_root=True)
                     if res.success:

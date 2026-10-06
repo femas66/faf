@@ -515,3 +515,28 @@ async def test_productivity_alarm_and_timer():
         assert res_cal.success is True
         assert "Meeting Proyek" in res_cal.output
 
+
+def test_clean_plain_chat_text_no_markdown_and_tables():
+    from src.core.agent import clean_plain_chat_text
+
+    # 1. Strips markdown tokens
+    sample_md = "**Tebal** dan `kode` serta *miring*."
+    cleaned = clean_plain_chat_text(sample_md)
+    assert cleaned == "Tebal dan kode serta miring."
+    assert "**" not in cleaned
+    assert "`" not in cleaned
+
+    # 2. Converts tables to bullet lists
+    sample_table = (
+        "Daftar proses:\n"
+        "| PID | Nama | Status |\n"
+        "|---|---|---|\n"
+        "| 101 | termux | running |\n"
+        "| 102 | python | idle |\n"
+        "\nSelesai."
+    )
+    cleaned_table = clean_plain_chat_text(sample_table)
+    assert "|" not in cleaned_table
+    assert "• PID: 101 | Nama: termux | Status: running" in cleaned_table or "PID: 101" in cleaned_table
+    assert "Selesai." in cleaned_table
+
