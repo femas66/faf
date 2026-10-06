@@ -50,6 +50,7 @@ def format_help_message() -> str:
     return (
         "faf-agent: Panduan Perintah & Kemampuan\n\n"
         "Perintah Cepat (Slash Commands):\n"
+        "• /time - Waktu, tanggal, hari, dan zona waktu lengkap saat ini\n"
         "• /device - Info model perangkat, versi Android, RAM, & status root\n"
         "• /battery - Status persentase baterai, charger, & suhu\n"
         "• /top - Daftar proses sistem teratas\n"

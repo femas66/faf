@@ -60,6 +60,24 @@ async def handle_battery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 @authorized_only
+async def handle_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /time: shows current detailed time, date, and timezone."""
+    if not update.effective_message:
+        return
+    status_msg = await update.effective_message.reply_text("● Mengambil informasi waktu...")
+    tool = default_registry.get("time_manager")
+    if tool:
+        ctx = ToolContext(
+            chat_id=update.effective_chat.id if update.effective_chat else 0,
+            user_id=update.effective_user.id if update.effective_user else 0,
+        )
+        res = await tool.execute(ctx, action="now")
+        await status_msg.edit_text(res.output)
+    else:
+        await status_msg.edit_text("Tool time_manager tidak ditemukan.")
+
+
+@authorized_only
 async def handle_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /top: shows top processes by CPU and RAM in clean plain text."""
     if not update.effective_message:

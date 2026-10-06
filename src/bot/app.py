@@ -15,6 +15,7 @@ from src.config import get_settings
 from src.bot.handlers.commands import (
     handle_start,
     handle_help,
+    handle_time,
     handle_device,
     handle_battery,
     handle_top,
@@ -44,6 +45,8 @@ def create_application() -> Application:
     # Register Slash Command Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("help", handle_help))
+    app.add_handler(CommandHandler("time", handle_time))
+    app.add_handler(CommandHandler("jam", handle_time))
     app.add_handler(CommandHandler("device", handle_device))
     app.add_handler(CommandHandler("battery", handle_battery))
     app.add_handler(CommandHandler("top", handle_top))

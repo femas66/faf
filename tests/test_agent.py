@@ -19,6 +19,7 @@ from src.tools.productivity import ProductivityControlTool
 from src.tools.media import MediaControlTool
 from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
+from src.tools.time_mgr import TimeManagerTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -539,4 +540,60 @@ def test_clean_plain_chat_text_no_markdown_and_tables():
     assert "|" not in cleaned_table
     assert "• PID: 101 | Nama: termux | Status: running" in cleaned_table or "PID: 101" in cleaned_table
     assert "Selesai." in cleaned_table
+
+
+@pytest.mark.asyncio
+async def test_time_manager_tool():
+    tool = TimeManagerTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Action now
+    res_now = await tool.execute(ctx, action="now")
+    assert res_now.success is True
+    assert "Informasi Waktu & Tanggal" in res_now.output
+    assert "Unix Epoch" in res_now.output
+
+    # 2. Action uptime
+    res_uptime = await tool.execute(ctx, action="uptime")
+    assert res_uptime.success is True
+
+    # 3. Action world_clock (overview)
+    res_wc = await tool.execute(ctx, action="world_clock")
+    assert res_wc.success is True
+    assert "Waktu Dunia" in res_wc.output
+    assert "WIB" in res_wc.output
+
+    # 4. Action world_clock (specific timezone)
+    res_tokyo = await tool.execute(ctx, action="world_clock", target_timezone="Asia/Tokyo")
+    assert res_tokyo.success is True
+    assert "Asia/Tokyo" in res_tokyo.output
+
+    # 5. Action timezone_info
+    res_tz = await tool.execute(ctx, action="timezone_info")
+    assert res_tz.success is True
+    assert "Zona Waktu" in res_tz.output
+
+    # 6. Action time_diff (future countdown)
+    res_diff = await tool.execute(ctx, action="time_diff", target_datetime="2035-01-01 00:00:00")
+    assert res_diff.success is True
+    assert "Perhitungan Selisih Waktu" in res_diff.output
+    assert "hari" in res_diff.output
+
+    # 7. Action add_subtract
+    res_add = await tool.execute(
+        ctx,
+        action="add_subtract",
+        operation="add",
+        days=5,
+        hours=2,
+        base_datetime="2026-10-01 10:00:00",
+    )
+    assert res_add.success is True
+    assert "06 Oktober 2026 12:00:00" in res_add.output
+
+    # 8. Action calendar_info
+    res_cal = await tool.execute(ctx, action="calendar_info")
+    assert res_cal.success is True
+    assert "Informasi Kalender" in res_cal.output
+    assert "Kuartal" in res_cal.output
 
