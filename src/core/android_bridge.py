@@ -11,8 +11,6 @@ import signal
 from dataclasses import dataclass
 from typing import Any
 
-import psutil
-
 from src.config import get_settings
 
 logger = logging.getLogger("faf_agent.bridge")
@@ -32,7 +30,7 @@ class CommandResult:
 
 
 class AndroidBridge:
-    """Bridge for interacting with Android via Termux, Termux:API, and Root shell."""
+    """Bridge for interacting with Android via Termux, Termux:API, and Root shell (Pure Python)."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -229,21 +227,38 @@ class AndroidBridge:
             info["android_version"] = platform.release()
             info["sdk_version"] = "N/A"
 
-        # Memory info via psutil
-        try:
-            mem = psutil.virtual_memory()
-            info["total_ram_mb"] = round(mem.total / (1024 * 1024), 1)
-            info["available_ram_mb"] = round(mem.available / (1024 * 1024), 1)
-            info["used_ram_percent"] = mem.percent
-        except Exception:
-            info["total_ram_mb"] = 0
-            info["available_ram_mb"] = 0
-            info["used_ram_percent"] = 0
+        # Memory info via /proc/meminfo (Pure Linux/Android)
+        total_mb = 0.0
+        avail_mb = 0.0
+        used_pct = 0.0
+        if os.path.exists("/proc/meminfo"):
+            try:
+                with open("/proc/meminfo", "r") as f:
+                    mem_data: dict[str, int] = {}
+                    for line in f:
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            k = parts[0].strip()
+                            v = parts[1].strip().split()[0]
+                            if v.isdigit():
+                                mem_data[k] = int(v)
+                    total_kb = mem_data.get("MemTotal", 0)
+                    avail_kb = mem_data.get("MemAvailable", mem_data.get("MemFree", 0))
+                    total_mb = round(total_kb / 1024.0, 1)
+                    avail_mb = round(avail_kb / 1024.0, 1)
+                    if total_kb > 0:
+                        used_pct = round(((total_kb - avail_kb) / total_kb) * 100.0, 1)
+            except Exception:
+                pass
+
+        info["total_ram_mb"] = total_mb
+        info["available_ram_mb"] = avail_mb
+        info["used_ram_percent"] = used_pct
 
         return info
 
     async def get_battery_info(self) -> dict[str, Any]:
-        """Fetch battery details via termux-battery-status or dumpsys battery."""
+        """Fetch battery details via termux-battery-status, dumpsys battery, or sysfs."""
         # 1. Try termux-battery-status
         if self.has_command("termux-battery-status"):
             res = await self.execute_shell("termux-battery-status", timeout=6)
@@ -273,18 +288,24 @@ class AndroidBridge:
             if data:
                 return data
 
-        # 3. Fallback via psutil.sensors_battery()
-        try:
-            sb = psutil.sensors_battery()
-            if sb:
+        # 3. Android sysfs battery fallback
+        cap_file = "/sys/class/power_supply/battery/capacity"
+        status_file = "/sys/class/power_supply/battery/status"
+        temp_file = "/sys/class/power_supply/battery/temp"
+        if os.path.exists(cap_file):
+            try:
+                pct = open(cap_file).read().strip()
+                status = open(status_file).read().strip() if os.path.exists(status_file) else "Unknown"
+                temp_raw = open(temp_file).read().strip() if os.path.exists(temp_file) else "0"
+                temp_c = round(float(temp_raw) / 10.0, 1) if temp_raw.isdigit() else "N/A"
                 return {
-                    "percentage": int(sb.percent),
-                    "plugged": "AC" if sb.power_plugged else "UNPLUGGED",
-                    "status": "CHARGING" if sb.power_plugged else "DISCHARGING",
-                    "temperature": "N/A",
+                    "percentage": int(pct) if pct.isdigit() else "N/A",
+                    "status": status,
+                    "temperature": temp_c,
+                    "plugged": "Unknown",
                 }
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         return {
             "percentage": "N/A",

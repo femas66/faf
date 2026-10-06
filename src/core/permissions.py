@@ -4,12 +4,11 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Awaitable
-
-import psutil
 
 from src.config import get_settings
 
@@ -27,10 +26,47 @@ class PendingConfirmation:
     timeout: int = 60
 
 
+def get_process_name_by_pid(pid: int) -> str:
+    """Retrieve process name by PID using pure Linux /proc or ps (zero binary dependency)."""
+    # 1. Linux/Android /proc filesystem
+    try:
+        comm_path = f"/proc/{pid}/comm"
+        if os.path.exists(comm_path):
+            with open(comm_path, "r") as f:
+                return f.read().strip().lower()
+    except Exception:
+        pass
+
+    try:
+        cmdline_path = f"/proc/{pid}/cmdline"
+        if os.path.exists(cmdline_path):
+            with open(cmdline_path, "rb") as f:
+                content = f.read().replace(b"\x00", b" ").decode(errors="ignore").strip()
+                if content:
+                    return content.split()[0].split("/")[-1].lower()
+    except Exception:
+        pass
+
+    # 2. ps command fallback
+    try:
+        res = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if res.returncode == 0 and res.stdout:
+            return res.stdout.strip().split("/")[-1].lower()
+    except Exception:
+        pass
+
+    return ""
+
+
 class PermissionManager:
     """Manages security validation, destructive command interception,
 
-    process immunity, and approval sessions.
+    process immunity, and approval sessions (Pure Python).
     """
 
     # Destructive keywords and regex patterns
@@ -82,15 +118,16 @@ class PermissionManager:
         self._lock = asyncio.Lock()
 
     def get_own_pids(self) -> set[int]:
-        """Return set of current process PID and immediate parent PID."""
+        """Return set of current process PID, parent PID, and child PIDs."""
         pids = {os.getpid(), os.getppid()}
+        # Linux/Android /proc children discovery
         try:
-            current_proc = psutil.Process(os.getpid())
-            for child in current_proc.children(recursive=True):
-                pids.add(child.pid)
-            parent = current_proc.parent()
-            if parent:
-                pids.add(parent.pid)
+            children_path = f"/proc/{os.getpid()}/task/{os.getpid()}/children"
+            if os.path.exists(children_path):
+                with open(children_path, "r") as f:
+                    for c in f.read().split():
+                        if c.isdigit():
+                            pids.add(int(c))
         except Exception:
             pass
         return pids
@@ -154,15 +191,12 @@ class PermissionManager:
                         f"IMMUNITY VIOLATION: Perintah menargetkan PID {pid_num} (proses faf-agent sendiri).",
                     )
                 # Check process name of target PID
-                try:
-                    proc = psutil.Process(pid_num)
-                    if proc.name().lower() in self.PROTECTED_PROCESS_NAMES:
-                        return (
-                            True,
-                            f"IMMUNITY VIOLATION: Perintah menargetkan proses esensial sistem/Termux (`{proc.name()}`).",
-                        )
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                proc_name = get_process_name_by_pid(pid_num)
+                if proc_name and proc_name in self.PROTECTED_PROCESS_NAMES:
+                    return (
+                        True,
+                        f"IMMUNITY VIOLATION: Perintah menargetkan proses esensial sistem/Termux (`{proc_name}`).",
+                    )
             else:
                 # Target is process name
                 target_lower = target.lower()

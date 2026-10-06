@@ -5,8 +5,6 @@ import os
 import signal
 from typing import Any
 
-import psutil
-
 from src.core.android_bridge import bridge
 from src.core.permissions import permission_manager
 from src.tools.base import BaseTool, ToolContext, ToolResult
@@ -17,7 +15,7 @@ logger = logging.getLogger("faf_agent.tools.process_mgr")
 class ProcessManagerTool(BaseTool):
     name = "process_manager"
     description = (
-        "Manajemen proses sistem: melihat daftar proses dengan konsumsi CPU/RAM tertinggi "
+        "Manajemen proses sistem: melihat daftar proses sistem yang berjalan "
         "dan menghentikan proses tertentu via PID (dilengkapi proteksi anti self-termination)."
     )
     parameters = {
@@ -55,30 +53,17 @@ class ProcessManagerTool(BaseTool):
         # 1. List Processes
         if action == "list_processes":
             limit = kwargs.get("limit", 10)
-            procs = []
-            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "status"]):
-                try:
-                    p_info = p.info
-                    procs.append(p_info)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-
-            # Sort by memory percent or cpu
-            procs.sort(key=lambda x: (x.get("memory_percent") or 0.0), reverse=True)
-            top_procs = procs[:limit]
-
-            lines = ["PID    | CPU % | MEM % | PROSES"]
-            lines.append("-------|-------|-------|----------------------")
-            for p in top_procs:
-                pid = str(p.get("pid", 0)).ljust(6)
-                cpu = f"{p.get('cpu_percent', 0.0):.1f}%".ljust(5)
-                mem = f"{p.get('memory_percent', 0.0):.1f}%".ljust(5)
-                name = str(p.get("name", "unknown"))[:22]
-                lines.append(f"{pid} | {cpu} | {mem} | {name}")
-
+            res = await bridge.execute_shell("ps -ef || ps -A", timeout=5)
+            if res.success and res.stdout:
+                raw_lines = [l for l in res.stdout.splitlines() if l.strip()]
+                preview_lines = raw_lines[: limit + 1]
+                return ToolResult(
+                    success=True,
+                    output="\n".join(preview_lines),
+                )
             return ToolResult(
                 success=True,
-                output="\n".join(lines),
+                output="Tidak ada daftar proses yang dapat diambil saat ini.",
             )
 
         # 2. Kill Process with Immunity Verification
@@ -97,18 +82,18 @@ class ProcessManagerTool(BaseTool):
                 logger.warning(f"Prevented kill attempt on protected process: PID {target_pid}")
                 return ToolResult(success=False, output="", error=reason)
 
-            # Attempt to kill via psutil or root shell
+            # Native os.kill (standard library)
             try:
-                proc = psutil.Process(target_pid)
-                pname = proc.name()
-                proc.send_signal(sig_num)
+                os.kill(target_pid, sig_num)
                 return ToolResult(
                     success=True,
-                    output=f"Proses '{pname}' (PID {target_pid}) berhasil dikirim sinyal {sig_num}.",
+                    output=f"Proses PID {target_pid} berhasil dikirim sinyal {sig_num}.",
                 )
-            except psutil.NoSuchProcess:
-                return ToolResult(success=False, output="", error=f"Proses dengan PID {target_pid} tidak ditemukan.")
-            except psutil.AccessDenied:
+            except ProcessLookupError:
+                return ToolResult(
+                    success=False, output="", error=f"Proses dengan PID {target_pid} tidak ditemukan."
+                )
+            except PermissionError:
                 # Fallback to root kill if permitted
                 if bridge.is_root_available():
                     res = await bridge.execute_shell(f"kill -{sig_num} {target_pid}", as_root=True)
@@ -126,6 +111,12 @@ class ProcessManagerTool(BaseTool):
                     success=False,
                     output="",
                     error=f"Akses ditolak untuk menghentikan PID {target_pid}. Diperlukan hak akses root.",
+                )
+            except Exception as e:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal mengirim sinyal ke PID {target_pid}: {str(e)}",
                 )
 
         return ToolResult(success=False, output="", error=f"Aksi '{action}' tidak dikenal.")

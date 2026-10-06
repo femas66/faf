@@ -266,7 +266,6 @@ async def test_process_manager_tool():
     res_list = await tool.execute(ctx, action="list_processes", limit=5)
     assert res_list.success is True
     assert "PID" in res_list.output
-    assert "CPU %" in res_list.output
 
     # Kill process with self-termination guard
     res_kill = await tool.execute(ctx, action="kill_process", pid=os.getpid())
