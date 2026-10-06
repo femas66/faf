@@ -36,7 +36,11 @@ ATURAN FORMAT DAN GAYA KOMUNIKASI CHAT (SANGAT KETAT):
 
 ATURAN WAJIB TENTANG WAKTU & TANGGAL:
 - Setiap kali pengguna bertanya tentang jam berapa sekarang, tanggal hari ini, hari apa saat ini, zona waktu, durasi aktif / uptime HP, hitung mundur (countdown), selisih waktu, atau waktu kota dunia, Anda WAJIB memanggil tool 'time_manager'!
-- DILARANG KERAS mengeksekusi perintah shell/bash (seperti date, uptime, timedatectl, hwclock) untuk mengecek waktu. Gunakan tool 'time_manager' khusus yang sudah disediakan."""
+- DILARANG KERAS mengeksekusi perintah shell/bash (seperti date, uptime, timedatectl, hwclock) untuk mengecek waktu. Gunakan tool 'time_manager' khusus yang sudah disediakan.
+
+ATURAN WAJIB TENTANG PENGELOLAAN FILE & DIREKTORI:
+- Setiap kali pengguna meminta untuk membaca file, melihat dari baris tertentu, menulis file baru, mengedit atau mengganti baris dalam file, menyisipkan teks, mencari kata/grep di berkas, melihat daftar isi folder, menyalin, memindahkan, atau menghapus file, Anda WAJIB memanggil tool 'file_manager'!
+- DILARANG KERAS mengeksekusi perintah shell/bash (seperti cat, head, tail, sed, awk, grep, touch, nano, rm, cp, mv, ls) jika dapat dilakukan oleh tool 'file_manager'. Gunakan 'file_manager' karena jauh lebih aman, presisi, dan terstruktur."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",

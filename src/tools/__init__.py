@@ -8,6 +8,7 @@ from src.tools.media import MediaControlTool
 from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
 from src.tools.time_mgr import TimeManagerTool
+from src.tools.file_mgr import FileManagerTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -20,6 +21,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(PackageManagerTool())
     registry.register(ProcessManagerTool())
     registry.register(TimeManagerTool())
+    registry.register(FileManagerTool())
     return registry
 
 
@@ -38,6 +40,7 @@ __all__ = [
     "PackageManagerTool",
     "ProcessManagerTool",
     "TimeManagerTool",
+    "FileManagerTool",
     "create_default_registry",
     "default_registry",
 ]

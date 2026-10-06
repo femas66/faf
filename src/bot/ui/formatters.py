@@ -68,9 +68,12 @@ def format_help_message() -> str:
         "• Nyalakan senter dan pasang alarm besok jam 07:00\n"
         "• Buka aplikasi WhatsApp dan putar musik\n"
         "• Cari video tutorial di YouTube\n"
+        "• Baca file /sdcard/Notes/todo.txt dari baris 5 sampai 15\n"
+        "• Edit atau ganti teks tertentu dalam file script.py\n"
+        "• Cari file yang mengandung kata tertentu di direktori ini\n"
         "• Simpan catatan belanja\n\n"
         "Catatan Keamanan:\n"
-        "Setiap perintah berbahaya (hapus partisi, format, reboot) akan memicu tombol konfirmasi persetujuan terlebih dahulu."
+        "Setiap perintah berbahaya (hapus partisi, format, hapus folder, reboot) akan memicu tombol konfirmasi persetujuan terlebih dahulu."
     )
 
 

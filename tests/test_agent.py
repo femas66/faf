@@ -20,6 +20,7 @@ from src.tools.media import MediaControlTool
 from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
 from src.tools.time_mgr import TimeManagerTool
+from src.tools.file_mgr import FileManagerTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -596,4 +597,215 @@ async def test_time_manager_tool():
     assert res_cal.success is True
     assert "Informasi Kalender" in res_cal.output
     assert "Kuartal" in res_cal.output
+
+
+@pytest.mark.asyncio
+async def test_file_manager_crud_and_line_operations():
+    tool = FileManagerTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = os.path.join(tmpdir, "sample.txt")
+
+        # 1. Action: WRITE
+        initial_content = "Baris 1: Halo Dunia\nBaris 2: Belajar Python\nBaris 3: Asyncio\nBaris 4: Termux Android\nBaris 5: Selesai"
+        res_write = await tool.execute(ctx, action="write", path=test_file, content=initial_content)
+        assert res_write.success is True
+        assert "Berhasil menulis ke berkas" in res_write.output
+        assert "5 baris" in res_write.output
+
+        # 2. Action: READ (all lines)
+        res_read_all = await tool.execute(ctx, action="read", path=test_file)
+        assert res_read_all.success is True
+        assert "Rentang Baris: 1 sampai 5" in res_read_all.output
+        assert "Baris 1: Halo Dunia" in res_read_all.output
+
+        # 3. Action: READ (slice start_line=2 to end_line=4 with line numbers)
+        res_read_slice = await tool.execute(
+            ctx, action="read", path=test_file, start_line=2, end_line=4, with_line_numbers=True
+        )
+        assert res_read_slice.success is True
+        assert "2 sampai 4" in res_read_slice.output
+        assert "2 | Baris 2: Belajar Python" in res_read_slice.output
+        assert "4 | Baris 4: Termux Android" in res_read_slice.output
+        assert "Baris 1: Halo Dunia" not in res_read_slice.output
+        assert "Baris 5: Selesai" not in res_read_slice.output
+
+        # 4. Action: APPEND
+        res_append = await tool.execute(ctx, action="append", path=test_file, content="Baris 6: Tambahan Baru")
+        assert res_append.success is True
+        assert "Berhasil menambahkan teks" in res_append.output
+
+        # Verify appended line
+        res_read_after_append = await tool.execute(ctx, action="read", path=test_file, start_line=6, end_line=6)
+        assert res_read_after_append.success is True
+        assert "Baris 6: Tambahan Baru" in res_read_after_append.output
+
+        # 5. Action: EDIT_LINES (replace lines 2 to 3)
+        res_edit = await tool.execute(
+            ctx,
+            action="edit_lines",
+            path=test_file,
+            start_line=2,
+            end_line=3,
+            content="Baris 2: Diedit Jadi Pintar\nBaris 3: Diedit Jadi Cepat",
+        )
+        assert res_edit.success is True
+        assert "Berhasil mengedit baris" in res_edit.output
+
+        # Verify edited lines
+        res_verify_edit = await tool.execute(ctx, action="read", path=test_file, start_line=2, end_line=3)
+        assert "Diedit Jadi Pintar" in res_verify_edit.output
+        assert "Diedit Jadi Cepat" in res_verify_edit.output
+
+        # 6. Action: INSERT_LINES (insert after line 1)
+        res_insert = await tool.execute(
+            ctx,
+            action="insert_lines",
+            path=test_file,
+            line_number=1,
+            position="after",
+            content="Baris 1.5: Sisipan Menarik",
+        )
+        assert res_insert.success is True
+        assert "Berhasil menyisipkan baris" in res_insert.output
+
+        # 7. Action: FIND_REPLACE (replace string)
+        res_fr = await tool.execute(
+            ctx,
+            action="find_replace",
+            path=test_file,
+            find_text="Sisipan Menarik",
+            replace_text="Sisipan Keren",
+            replace_all=True,
+        )
+        assert res_fr.success is True
+        assert "Berhasil mengganti teks" in res_fr.output
+
+        # 8. Action: FILE_INFO / STAT
+        res_info = await tool.execute(ctx, action="file_info", path=test_file)
+        assert res_info.success is True
+        assert "Informasi Berkas" in res_info.output
+        assert "Hash SHA256" in res_info.output
+        assert "Hash MD5" in res_info.output
+
+
+@pytest.mark.asyncio
+async def test_file_manager_directory_and_advanced_actions():
+    tool = FileManagerTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sub_dir = os.path.join(tmpdir, "subdir", "deep")
+        file1 = os.path.join(sub_dir, "file1.py")
+        file2 = os.path.join(sub_dir, "file2.txt")
+
+        # 1. Action: MAKE_DIR
+        res_mkdir = await tool.execute(ctx, action="make_dir", path=sub_dir)
+        assert res_mkdir.success is True
+        assert os.path.exists(sub_dir)
+
+        # Write files for testing
+        await tool.execute(ctx, action="write", path=file1, content="def test_function():\n    return 'faf_success'")
+        await tool.execute(ctx, action="write", path=file2, content="catatan rahasia faf_success ada di sini")
+
+        # 2. Action: LIST_DIR
+        res_ls = await tool.execute(ctx, action="list_dir", path=sub_dir)
+        assert res_ls.success is True
+        assert "Daftar Direktori" in res_ls.output
+        assert "file1.py" in res_ls.output
+        assert "file2.txt" in res_ls.output
+
+        # 3. Action: SEARCH_TEXT (grep pattern recursively)
+        res_search = await tool.execute(
+            ctx, action="search_text", path=tmpdir, pattern="faf_success", recursive=True
+        )
+        assert res_search.success is True
+        assert "faf_success" in res_search.output
+        assert "file1.py:2" in res_search.output
+
+        # 4. Action: COPY
+        copy_dest = os.path.join(tmpdir, "copied_file1.py")
+        res_copy = await tool.execute(ctx, action="copy", source_path=file1, destination_path=copy_dest)
+        assert res_copy.success is True
+        assert os.path.exists(copy_dest)
+
+        # 5. Action: MOVE
+        moved_dest = os.path.join(tmpdir, "moved_file1.py")
+        res_move = await tool.execute(ctx, action="move", source_path=copy_dest, destination_path=moved_dest)
+        assert res_move.success is True
+        assert not os.path.exists(copy_dest)
+        assert os.path.exists(moved_dest)
+
+        # 6. Action: CHECKSUM
+        res_chk = await tool.execute(ctx, action="checksum", path=moved_dest)
+        assert res_chk.success is True
+        assert "SHA-256" in res_chk.output
+
+        # 7. Action: TREE
+        res_tree = await tool.execute(ctx, action="tree", path=tmpdir, max_depth=3)
+        assert res_tree.success is True
+        assert "Struktur Direktori" in res_tree.output
+
+
+@pytest.mark.asyncio
+async def test_file_manager_security_guards_and_confirmation():
+    tool = FileManagerTool()
+
+    # 1. Block credential file read
+    ctx_normal = ToolContext(chat_id=123, user_id=456)
+    res_env = await tool.execute(ctx_normal, action="read", path="/data/data/com.termux/.env")
+    assert res_env.success is False
+    assert "kredensial" in res_env.error.lower()
+
+    res_ssh = await tool.execute(ctx_normal, action="read", path="/home/termux/.ssh/id_rsa")
+    assert res_ssh.success is False
+    assert "kredensial" in res_ssh.error.lower()
+
+    # 2. Block deleting protected paths
+    res_prot = await tool.execute(ctx_normal, action="delete", path="/sdcard")
+    assert res_prot.success is False
+    assert "SECURITY VIOLATION" in res_prot.error
+
+    # 3. Delete file with approval
+    with tempfile.TemporaryDirectory() as tmpdir:
+        del_target = os.path.join(tmpdir, "to_delete.txt")
+        with open(del_target, "w") as f:
+            f.write("delete me")
+
+        confirm_called = False
+        async def mock_confirm_approved(title: str, details: str) -> bool:
+            nonlocal confirm_called
+            confirm_called = True
+            return True
+
+        ctx_approve = ToolContext(
+            chat_id=123,
+            user_id=456,
+            on_request_confirmation=mock_confirm_approved,
+        )
+        res_del = await tool.execute(ctx_approve, action="delete", path=del_target)
+        assert res_del.success is True
+        assert confirm_called is True
+        assert not os.path.exists(del_target)
+
+    # 4. Delete file with rejection
+    with tempfile.TemporaryDirectory() as tmpdir:
+        del_target2 = os.path.join(tmpdir, "to_delete2.txt")
+        with open(del_target2, "w") as f:
+            f.write("keep me")
+
+        async def mock_confirm_rejected(title: str, details: str) -> bool:
+            return False
+
+        ctx_reject = ToolContext(
+            chat_id=123,
+            user_id=456,
+            on_request_confirmation=mock_confirm_rejected,
+        )
+        res_del_rej = await tool.execute(ctx_reject, action="delete", path=del_target2)
+        assert res_del_rej.success is False
+        assert "dibatalkan" in res_del_rej.error.lower()
+        assert os.path.exists(del_target2)
+
 
