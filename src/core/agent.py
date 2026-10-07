@@ -51,13 +51,15 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
   11. 'media_downloader': PENGUNDUH MEDIA & BERKAS LENGKAP. Gunakan tool ini untuk mengunduh berkas langsung dari internet (HTTP/HTTPS via aria2c/curl/native), mengekstrak video atau audio/MP3 dari YouTube, TikTok, Instagram, Twitter/X, SoundCloud, dll. (via yt-dlp), memeriksa info metadata URL sebelum diunduh, unduh batch banyak tautan, unduh torrent/magnet, serta melihat riwayat berkas unduhan di perangkat (/sdcard/Download). Berkas <= 50MB otomatis dikirim ke Telegram pengguna.
   12. 'ocr_extract': OCR LOKAL 100% OFFLINE. Ekstrak teks dari foto, gambar, dokumen, atau tangkapan layar langsung via Tesseract di Termux tanpa cloud/LLM.
   13. 'web_search': RISET & PENELUSURAN WEB OTONOM. Cari web (search), baca isi halaman web bersih (visit), riset mendalam multi-sumber (deep_research), dan petakan tautan (extract_links).
-  14. 'memory_manager': MEMORI JANGKA PANJANG PERMANEN (HERMES-GRADE). Simpan fakta penting tentang pengguna (store), perbarui (update), cari (search), atau lihat (list). Fakta ini permanen di database lokal dan selalu diingat di setiap percakapan baru.
+  14. 'memory_manager': ARSITEKTUR MEMORI KOGNITIF HERMES (Fakta Permanen, Memori Episodik, & Graph RAG). Simpan/kelola fakta penting (store, update, get, list), catat riwayat peristiwa/pengalaman tugas (store_episode, list_episodes, search_episodes), petakan hubungan entitas dalam graf pengetahuan (add_relation, query_graph, search_graph), jalankan pencarian semantik terpadu lintas-memori (hybrid_search), serta konsolidasi refleksi (reflect).
   15. 'python_repl': INTERPRETER KODE PYTHON IN-MEMORY (HERMES-GRADE). Jalankan kode/algoritma Python secara langsung dalam memori perangkat untuk kalkulasi rumit, transformasi data JSON/regex/string/tanggal, manipulasi biner/hash/base64, dan pengujian script. Variabel tersimpan antar pemanggilan (stateful session).
   16. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas.
 
 PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
 - Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
-- Jangan pernah melupakan preferensi pengguna. Manfaatkan fakta yang tercantum di bagian [MEMORI PERMANEN & FAKTA PENGGUNA TERVERIFIKASI] secara alami dalam setiap respons tanpa perlu bertanya ulang."""
+- Jika pengguna menceritakan peristiwa penting atau menyelesaikan proyek/tugas signifikan, gunakan 'store_episode' untuk mengabadikan peristiwa tersebut ke memori episodik.
+- Jika terdapat relasi penting antarentitas (misal: orang X punya nomor HP Y, atau device A terhubung dengan aksesoris B), gunakan 'add_relation' untuk memperkaya graf pengetahuan.
+- Jangan pernah melupakan preferensi pengguna. Manfaatkan fakta dan relasi yang tercantum di bagian memori secara alami dalam setiap respons tanpa perlu bertanya ulang."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",
