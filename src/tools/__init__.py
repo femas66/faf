@@ -9,6 +9,7 @@ from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
 from src.tools.time_mgr import TimeManagerTool
 from src.tools.file_mgr import FileManagerTool
+from src.tools.device_interaction import DeviceInteractionTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -22,6 +23,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(ProcessManagerTool())
     registry.register(TimeManagerTool())
     registry.register(FileManagerTool())
+    registry.register(DeviceInteractionTool())
     return registry
 
 
@@ -41,6 +43,7 @@ __all__ = [
     "ProcessManagerTool",
     "TimeManagerTool",
     "FileManagerTool",
+    "DeviceInteractionTool",
     "create_default_registry",
     "default_registry",
 ]

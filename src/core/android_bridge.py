@@ -67,6 +67,14 @@ class AndroidBridge:
         """Check if command binary exists in system PATH."""
         return shutil.which(cmd) is not None
 
+    async def get_prop(self, prop_name: str, default: str = "") -> str:
+        """Fetch Android system property using getprop."""
+        if self.has_command("getprop"):
+            res = await self.execute_shell(f"getprop {prop_name}", timeout=3)
+            if res.success and res.stdout.strip():
+                return res.stdout.strip()
+        return default
+
     def _build_root_command(self, raw_cmd: str) -> str:
         """Wrap command with root privileges and Termux environment persistence."""
         termux_prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
@@ -202,6 +210,36 @@ class AndroidBridge:
 
         return count
 
+    def get_ram_info(self) -> dict[str, Any]:
+        """Fetch RAM memory info from /proc/meminfo or fallback."""
+        total_mb = 0.0
+        avail_mb = 0.0
+        used_pct = 0.0
+        if os.path.exists("/proc/meminfo"):
+            try:
+                with open("/proc/meminfo", "r") as f:
+                    mem_data: dict[str, int] = {}
+                    for line in f:
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            k = parts[0].strip()
+                            v = parts[1].strip().split()[0]
+                            if v.isdigit():
+                                mem_data[k] = int(v)
+                    total_kb = mem_data.get("MemTotal", 0)
+                    avail_kb = mem_data.get("MemAvailable", mem_data.get("MemFree", 0))
+                    total_mb = round(total_kb / 1024.0, 1)
+                    avail_mb = round(avail_kb / 1024.0, 1)
+                    if total_kb > 0:
+                        used_pct = round(((total_kb - avail_kb) / total_kb) * 100.0, 1)
+            except Exception:
+                pass
+        return {
+            "total_mb": total_mb,
+            "available_mb": avail_mb,
+            "used_percent": used_pct,
+        }
+
     async def get_device_info(self) -> dict[str, Any]:
         """Fetch device information (Manufacturer, Model, Android version, Root, RAM)."""
         info: dict[str, Any] = {
@@ -227,33 +265,10 @@ class AndroidBridge:
             info["android_version"] = platform.release()
             info["sdk_version"] = "N/A"
 
-        # Memory info via /proc/meminfo (Pure Linux/Android)
-        total_mb = 0.0
-        avail_mb = 0.0
-        used_pct = 0.0
-        if os.path.exists("/proc/meminfo"):
-            try:
-                with open("/proc/meminfo", "r") as f:
-                    mem_data: dict[str, int] = {}
-                    for line in f:
-                        parts = line.split(":")
-                        if len(parts) == 2:
-                            k = parts[0].strip()
-                            v = parts[1].strip().split()[0]
-                            if v.isdigit():
-                                mem_data[k] = int(v)
-                    total_kb = mem_data.get("MemTotal", 0)
-                    avail_kb = mem_data.get("MemAvailable", mem_data.get("MemFree", 0))
-                    total_mb = round(total_kb / 1024.0, 1)
-                    avail_mb = round(avail_kb / 1024.0, 1)
-                    if total_kb > 0:
-                        used_pct = round(((total_kb - avail_kb) / total_kb) * 100.0, 1)
-            except Exception:
-                pass
-
-        info["total_ram_mb"] = total_mb
-        info["available_ram_mb"] = avail_mb
-        info["used_ram_percent"] = used_pct
+        ram = self.get_ram_info()
+        info["total_ram_mb"] = ram["total_mb"]
+        info["available_ram_mb"] = ram["available_mb"]
+        info["used_ram_percent"] = ram["used_percent"]
 
         return info
 

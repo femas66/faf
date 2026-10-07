@@ -21,6 +21,7 @@ from src.tools.package_mgr import PackageManagerTool
 from src.tools.process_mgr import ProcessManagerTool
 from src.tools.time_mgr import TimeManagerTool
 from src.tools.file_mgr import FileManagerTool
+from src.tools.device_interaction import DeviceInteractionTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -807,5 +808,89 @@ async def test_file_manager_security_guards_and_confirmation():
         assert res_del_rej.success is False
         assert "dibatalkan" in res_del_rej.error.lower()
         assert os.path.exists(del_target2)
+
+
+@pytest.mark.asyncio
+async def test_device_interaction_tool():
+    tool = DeviceInteractionTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    with patch("src.tools.device_interaction.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="", stderr="", returncode=0, command="input ...", executed_as_root=False
+        )
+
+        # 1. Tap
+        res_tap = await tool.execute(ctx, action="tap", x=500, y=1000)
+        assert res_tap.success is True
+        assert "(500, 1000)" in res_tap.output
+
+        # 2. Swipe
+        res_swipe = await tool.execute(ctx, action="swipe", x1=500, y1=1500, x2=500, y2=500, duration_ms=250)
+        assert res_swipe.success is True
+        assert "Usapan layar (swipe) berhasil" in res_swipe.output
+
+        # 3. Keyevent
+        res_key = await tool.execute(ctx, action="keyevent", key="home")
+        assert res_key.success is True
+        assert "home" in res_key.output
+        assert "keycode 3" in res_key.output
+
+        # 4. Type text
+        res_type = await tool.execute(ctx, action="type_text", text="Halo Dunia Android")
+        assert res_type.success is True
+        assert "Halo Dunia Android" in res_type.output
+
+        # 5. Wake & Sleep
+        res_wake = await tool.execute(ctx, action="wake")
+        assert res_wake.success is True
+        res_sleep = await tool.execute(ctx, action="sleep")
+        assert res_sleep.success is True
+
+        # 6. Notifications & Settings
+        res_exp = await tool.execute(ctx, action="expand_notifications")
+        assert res_exp.success is True
+
+
+@pytest.mark.asyncio
+async def test_expanded_system_and_productivity_tools():
+    sys_tool = SystemSettingsTool()
+    prod_tool = ProductivityControlTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. System specs
+    res_specs = await sys_tool.execute(ctx, action="specs")
+    assert res_specs.success is True
+    assert "Informasi Lengkap Perangkat Android" in res_specs.output
+    assert "Memori RAM" in res_specs.output
+
+    # 2. System volume & ringer
+    with patch("src.tools.system.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="", stderr="", returncode=0, command="termux-volume ...", executed_as_root=False
+        )
+        res_vol = await sys_tool.execute(ctx, action="volume", volume_stream="music", volume_value=10)
+        assert res_vol.success is True
+        assert "10/15" in res_vol.output
+
+        res_ring = await sys_tool.execute(ctx, action="ringer_mode", ringer_mode="vibrate")
+        assert res_ring.success is True
+        assert "VIBRATE" in res_ring.output
+
+    # 3. Productivity toast & clipboard
+    with patch("src.tools.productivity.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="Isi teks clipboard rahasia", stderr="", returncode=0, command="termux-clipboard...", executed_as_root=False
+        )
+        res_toast = await prod_tool.execute(ctx, action="toast", content="Halo Toast")
+        assert res_toast.success is True
+
+        res_cb_set = await prod_tool.execute(ctx, action="clipboard_set", content="Teks baru")
+        assert res_cb_set.success is True
+
+        res_cb_get = await prod_tool.execute(ctx, action="clipboard_get")
+        assert res_cb_get.success is True
+        assert "Isi teks clipboard rahasia" in res_cb_get.output
+
 
 

@@ -34,13 +34,18 @@ ATURAN FORMAT DAN GAYA KOMUNIKASI CHAT (SANGAT KETAT):
 4. PENGECUALIAN: Hanya gunakan format markdown jika pengguna secara eksplisit meminta Anda untuk membuat, mengedit, atau menulis isi file dokumen berekstensi .md.
 5. Hindari penggunaan emoji yang berlebihan. Jawaban harus ringkas, lugas, akurat, dan langsung ke inti permasalahan.
 
-ATURAN WAJIB TENTANG WAKTU & TANGGAL:
-- Setiap kali pengguna bertanya tentang jam berapa sekarang, tanggal hari ini, hari apa saat ini, zona waktu, durasi aktif / uptime HP, hitung mundur (countdown), selisih waktu, atau waktu kota dunia, Anda WAJIB memanggil tool 'time_manager'!
-- DILARANG KERAS mengeksekusi perintah shell/bash (seperti date, uptime, timedatectl, hwclock) untuk mengecek waktu. Gunakan tool 'time_manager' khusus yang sudah disediakan.
-
-ATURAN WAJIB TENTANG PENGELOLAAN FILE & DIREKTORI:
-- Setiap kali pengguna meminta untuk membaca file, melihat dari baris tertentu, menulis file baru, mengedit atau mengganti baris dalam file, menyisipkan teks, mencari kata/grep di berkas, melihat daftar isi folder, menyalin, memindahkan, atau menghapus file, Anda WAJIB memanggil tool 'file_manager'!
-- DILARANG KERAS mengeksekusi perintah shell/bash (seperti cat, head, tail, sed, awk, grep, touch, nano, rm, cp, mv, ls) jika dapat dilakukan oleh tool 'file_manager'. Gunakan 'file_manager' karena jauh lebih aman, presisi, dan terstruktur."""
+ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
+- Anda memiliki akses penuh ke sistem Android fisik melalui serangkaian tool khusus yang sangat canggih dan presisi.
+- SELALU prioritaskan menggunakan tool khusus di bawah ini daripada mengeksekusi shell command manual:
+  1. 'time_manager': Jam, tanggal, uptime HP, selisih waktu/countdown, waktu dunia, dan kalender.
+  2. 'file_manager': Membaca (seluruhnya/per baris), menulis, mengedit baris, menyisipkan teks, cari/ganti, grep/pencarian, info berkas, pohon direktori, salin, pindah, dan hapus berkas.
+  3. 'system_settings': WiFi (status/scan/toggle), Data Seluler, Bluetooth, Hotspot, Mode Pesawat, GPS/Lokasi, NFC, Volume semua stream, Mode Dering, DND, Kecerahan layar, Rotasi layar, Resolusi, Senter (torch), Getar, Screenshot, Sensor hardware, Suhu thermal, Status baterai, dan Diagnostik IP/Ping.
+  4. 'productivity_control': Pasang alarm, timer hitung mundur, agenda kalender, notifikasi pop-up layar, pesan toast, catatan lokal, kirim/baca SMS, cari kontak, panggilan telepon, info BTS/seluler, dan baca/salin clipboard.
+  5. 'media_control': Kontrol pemutar musik (play/pause/next/prev), YouTube, buka URL peramban, ambil foto kamera depan/belakang ke Telegram, rekam suara mikrofon ke Telegram, Text-to-Speech (berbicara lantang lewat speaker ponsel), dan putar audio lokal.
+  6. 'package_manager': Daftar aplikasi (3rd-party/system), buka aplikasi via nama/paket, info versi/APK, cek aplikasi yang sedang aktif di layar (current_app), force stop, enable/disable, clear data, dan uninstall.
+  7. 'process_manager': Pantau proses sistem Linux/Android, top proses/beban CPU, inspeksi mendalam PID, dan hentikan proses dengan proteksi anti self-termination.
+  8. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
+  9. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",
