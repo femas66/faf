@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import ast
 import asyncio
-import contextlib
-import io
+import json
 import logging
 import os
-import re
+import struct
 import sys
+import tempfile
 import time
-import traceback
 from typing import Any
 
 from src.config import get_settings
@@ -28,7 +26,7 @@ def _clean_traceback(tb_str: str) -> str:
     filtered: list[str] = []
     skip = False
     for line in lines:
-        if "python_repl.py" in line:
+        if "python_repl.py" in line or "repl_worker.py" in line:
             skip = True
             continue
         if skip and line.strip().startswith("exec("):
@@ -38,19 +36,142 @@ def _clean_traceback(tb_str: str) -> str:
     return "\n".join(filtered).strip()
 
 
+def _get_clean_env() -> dict[str, str]:
+    """Bangun environment variabel yang bersih tanpa token rahasia atau kredensial."""
+    allowed_keys = {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PYTHONIOENCODING",
+        "PYTHONUNBUFFERED",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "VIRTUAL_ENV",
+        "TERM",
+    }
+    clean_env = {k: os.environ[k] for k in allowed_keys if k in os.environ}
+
+    # Pastikan direktori binary python aktif masuk ke PATH
+    py_bin_dir = os.path.dirname(sys.executable)
+    existing_path = clean_env.get("PATH", "/usr/bin:/bin:/usr/local/bin")
+    if py_bin_dir not in existing_path.split(os.pathsep):
+        clean_env["PATH"] = f"{py_bin_dir}{os.pathsep}{existing_path}"
+    else:
+        clean_env["PATH"] = existing_path
+
+    clean_env["PYTHONUNBUFFERED"] = "1"
+    clean_env["PYTHONIOENCODING"] = "utf-8"
+    clean_env["HOME"] = tempfile.gettempdir()
+    return clean_env
+
+
+class ReplSession:
+    """Mengelola proses worker Python terisolasi untuk satu sesi chat."""
+
+    def __init__(self, chat_id: int) -> None:
+        self.chat_id = chat_id
+        self.process: asyncio.subprocess.Process | None = None
+        self.lock = asyncio.Lock()
+
+    async def ensure_started(self) -> asyncio.subprocess.Process:
+        """Pastikan proses worker aktif dan siap menerima perintah."""
+        if self.process is not None and self.process.returncode is None:
+            return self.process
+
+        worker_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "repl_worker.py"))
+        clean_env = _get_clean_env()
+
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-u",
+            worker_path,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=clean_env,
+            cwd=tempfile.gettempdir(),
+        )
+        return self.process
+
+    async def send_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Kirim perintah JSON ke worker via length-prefixed framing."""
+        proc = await self.ensure_started()
+        if not proc.stdin or not proc.stdout:
+            raise RuntimeError("Subproses REPL tidak memiliki stream stdin/stdout aktif.")
+
+        data = json.dumps(payload).encode("utf-8")
+        header = struct.pack(">I", len(data))
+        proc.stdin.write(header + data)
+        await proc.stdin.drain()
+
+        try:
+            resp_header = await proc.stdout.readexactly(4)
+            resp_len = struct.unpack(">I", resp_header)[0]
+            resp_bytes = await proc.stdout.readexactly(resp_len)
+            return json.loads(resp_bytes.decode("utf-8"))
+        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
+            await self.kill()
+            return {
+                "status": "error",
+                "stdout": "",
+                "stderr": "",
+                "eval_result": None,
+                "error": "SystemExit: Program mencoba keluar atau proses REPL terhenti.",
+            }
+
+    async def kill(self) -> None:
+        """Hentikan paksa proses worker dan tutup transport stream."""
+        proc = self.process
+        self.process = None
+        if proc is not None:
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+            if proc.stdin and not proc.stdin.is_closing():
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+            if hasattr(proc, "_transport") and proc._transport and not proc._transport.is_closing():
+                try:
+                    proc._transport.close()
+                except Exception:
+                    pass
+
+    def terminate_sync(self) -> None:
+        """Terminasi sinkron saat garbage collection atau shutdown."""
+        proc = self.process
+        self.process = None
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            if hasattr(proc, "_transport") and proc._transport and not proc._transport.is_closing():
+                try:
+                    proc._transport.close()
+                except Exception:
+                    pass
+
+
 class PythonReplTool(BaseTool):
-    """Tool interpreter Python in-memory stateful untuk kalkulasi, transformasi data, dan eksekusi algoritma."""
+    """Tool interpreter Python in-memory stateful terisolasi untuk kalkulasi, transformasi data, dan eksekusi algoritma."""
 
     name = "python_repl"
     description = (
-        "Tool interpreter kode Python in-memory tingkat tinggi (Hermes-grade Stateful Python REPL). "
-        "Mengeksekusi kode Python langsung di dalam memori proses Termux secara instan dan aman. "
+        "Tool interpreter kode Python stateful terisolasi tingkat tinggi (Hermes-grade Stateful Python REPL). "
+        "Mengeksekusi kode Python dalam subproses terisolasi dengan sanitasi kredensial secara aman. "
         "Fitur utama: "
         "1. Stateful/Persisten: Variabel, fungsi, class, dan modul yang di-import pada pemanggilan sebelumnya "
         "tetap tersimpan dalam memori untuk pemanggilan berikutnya dalam satu sesi chat. "
         "2. Auto Expression Evaluation: Ekspresi baris terakhir otomatis dihitung dan ditampilkan (misal: 12 * 8 langsung menghasilkan 96 tanpa perlu fungsi print). "
         "3. Tangkap Output Lengkap: Menangkap stdout (print), stderr, serta hasil kalkulasi secara simultan. "
-        "4. Proteksi Keamanan: Kebal terminasi diri (anti-self termination), timeout aman, dan proteksi kredensial. "
+        "4. Proteksi Keamanan: Terisolasi dalam subproses, proteksi kebocoran kredensial (os.environ bersih), anti-self termination, dan timeout aman. "
         "Gunakan saat membutuhkan perhitungan matematika rumit, manipulasi/parsing JSON, regex, pemrosesan teks besar, "
         "konversi unit/waktu, hashing/encoding, atau pengujian logika Python."
     )
@@ -79,37 +200,36 @@ class PythonReplTool(BaseTool):
         "required": [],
     }
 
+    _active_tools: set[PythonReplTool] = set()
+
     def __init__(self) -> None:
         super().__init__()
-        # Simpan namespace memori per chat_id agar antar pengguna/sesi terisolasi
-        self._sessions: dict[int, dict[str, Any]] = {}
+        # Simpan instance ReplSession per chat_id agar antar pengguna/sesi terisolasi
+        self._sessions: dict[int, ReplSession] = {}
         self._lock = asyncio.Lock()
-
-    def _get_session_scope(self, chat_id: int) -> dict[str, Any]:
-        """Ambil atau inisialisasi namespace variabel Python untuk chat tertentu."""
-        if chat_id not in self._sessions:
-            scope: dict[str, Any] = {
-                "__name__": "__main__",
-                "__doc__": "faf-agent in-memory Python REPL",
-            }
-            # Pasang proteksi anti-exit di dalam namespace
-            def _safe_exit(*args: Any, **kwargs: Any) -> None:
-                raise SystemExit("Pemanggilan sys.exit() dicegah dalam sesi REPL.")
-
-            def _safe_os_exit(*args: Any, **kwargs: Any) -> None:
-                raise RuntimeError("Pemanggilan os._exit() diblokir oleh sistem proteksi.")
-
-            scope["exit"] = _safe_exit
-            scope["quit"] = _safe_exit
-            self._sessions[chat_id] = scope
-
-        return self._sessions[chat_id]
+        self._active_tools.add(self)
 
     def _reset_session(self, chat_id: int) -> int:
-        """Kosongkan namespace memori sesi."""
-        old_count = len(self._sessions.get(chat_id, {}))
-        self._sessions.pop(chat_id, None)
-        return old_count
+        """Kosongkan dan hentikan subproses sesi."""
+        session = self._sessions.pop(chat_id, None)
+        if session:
+            session.terminate_sync()
+            return 1
+        return 0
+
+    async def close(self) -> None:
+        """Bersihkan seluruh worker aktif."""
+        async with self._lock:
+            for session in list(self._sessions.values()):
+                await session.kill()
+            self._sessions.clear()
+        self._active_tools.discard(self)
+
+    def __del__(self) -> None:
+        self._active_tools.discard(self)
+        for session in list(self._sessions.values()):
+            session.terminate_sync()
+        self._sessions.clear()
 
     async def execute(self, context: ToolContext, **kwargs: Any) -> ToolResult:
         action = str(kwargs.get("action") or "execute").lower().strip()
@@ -121,7 +241,9 @@ class PythonReplTool(BaseTool):
         # ------------------------------------------------------------------
         if action == "reset":
             async with self._lock:
-                self._reset_session(chat_id)
+                session = self._sessions.pop(chat_id, None)
+                if session:
+                    await session.kill()
             return ToolResult(
                 success=True,
                 output="Ruang lingkup memori Python REPL berhasil di-reset ke kondisi awal yang bersih.",
@@ -132,14 +254,15 @@ class PythonReplTool(BaseTool):
         # ------------------------------------------------------------------
         elif action == "inspect":
             async with self._lock:
-                scope = self._get_session_scope(chat_id)
-                # Filter builtins dan internal keys
-                user_vars = {
-                    k: v
-                    for k, v in scope.items()
-                    if not k.startswith("__") and k not in ("exit", "quit")
-                }
+                session = self._sessions.get(chat_id)
+                if session is None:
+                    return ToolResult(
+                        success=True,
+                        output="Memori sesi Python saat ini kosong (belum ada variabel atau fungsi tersimpan).",
+                    )
+                resp = await session.send_command({"action": "inspect"})
 
+            user_vars = resp.get("user_vars", {})
             if not user_vars:
                 return ToolResult(
                     success=True,
@@ -147,12 +270,8 @@ class PythonReplTool(BaseTool):
                 )
 
             lines = [f"Variabel & Objek Tersimpan di Memori ({len(user_vars)} item):", ""]
-            for k, v in sorted(user_vars.items()):
-                tname = type(v).__name__
-                val_repr = repr(v)
-                if len(val_repr) > 100:
-                    val_repr = val_repr[:100] + "..."
-                lines.append(f"• {k} ({tname}): {val_repr}")
+            for k, info in sorted(user_vars.items()):
+                lines.append(f"• {k} ({info['type']}): {info['repr']}")
 
             return ToolResult(success=True, output="\n".join(lines))
 
@@ -192,15 +311,20 @@ class PythonReplTool(BaseTool):
                 await context.on_status_update("● Menjalankan kode Python di memori...")
 
             async with self._lock:
-                scope = self._get_session_scope(chat_id)
+                if chat_id not in self._sessions:
+                    self._sessions[chat_id] = ReplSession(chat_id)
+                session = self._sessions[chat_id]
 
             try:
-                # Eksekusi sinkron di thread terpisah dengan timeout asyncio
-                stdout_str, stderr_str, eval_result, exec_err = await asyncio.wait_for(
-                    asyncio.to_thread(self._run_code_sync, raw_code, scope),
-                    timeout=float(timeout_sec),
-                )
+                async with session.lock:
+                    resp = await asyncio.wait_for(
+                        session.send_command({"action": "execute", "code": raw_code}),
+                        timeout=float(timeout_sec),
+                    )
             except asyncio.TimeoutError:
+                await session.kill()
+                async with self._lock:
+                    self._sessions.pop(chat_id, None)
                 return ToolResult(
                     success=False,
                     output="",
@@ -215,6 +339,11 @@ class PythonReplTool(BaseTool):
 
             if context.cancel_event.is_set():
                 return ToolResult(success=False, output="", error="Dibatalkan oleh pengguna.")
+
+            exec_err = resp.get("error")
+            stdout_str = resp.get("stdout", "")
+            stderr_str = resp.get("stderr", "")
+            eval_result = resp.get("eval_result")
 
             if exec_err:
                 clean_err = _clean_traceback(exec_err)
@@ -266,49 +395,4 @@ class PythonReplTool(BaseTool):
             success=False,
             output="",
             error=f"Aksi '{action}' tidak dikenal. Pilihan: execute, inspect, reset.",
-        )
-
-    def _run_code_sync(
-        self, code: str, scope: dict[str, Any]
-    ) -> tuple[str, str, str | None, str | None]:
-        """Eksekusi kode Python secara sinkron dengan isolasi stdout/stderr dan auto-expression eval."""
-        stdout_buf = io.StringIO()
-        stderr_buf = io.StringIO()
-        eval_result: str | None = None
-        exec_err: str | None = None
-
-        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
-            try:
-                tree = ast.parse(code)
-                if not tree.body:
-                    return "", "", None, None
-
-                # Jika baris terakhir adalah sebuah ekspresi (misal kalkulasi tanpa print),
-                # pisahkan agar di-eval dan ditampilkan nilainya (seperti REPL interaktif).
-                if isinstance(tree.body[-1], ast.Expr):
-                    last_expr = tree.body.pop()
-                    if tree.body:
-                        code_obj = compile(tree, filename="<repl>", mode="exec")
-                        exec(code_obj, scope)
-
-                    eval_code_obj = compile(
-                        ast.Expression(last_expr.value), filename="<repl>", mode="eval"
-                    )
-                    raw_val = eval(eval_code_obj, scope)
-                    if raw_val is not None:
-                        eval_result = repr(raw_val)
-                else:
-                    code_obj = compile(tree, filename="<repl>", mode="exec")
-                    exec(code_obj, scope)
-
-            except SystemExit as se:
-                exec_err = f"SystemExit: Program mencoba keluar ({se})."
-            except Exception:
-                exec_err = traceback.format_exc()
-
-        return (
-            stdout_buf.getvalue(),
-            stderr_buf.getvalue(),
-            eval_result,
-            exec_err,
         )

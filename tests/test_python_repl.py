@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import pytest
 
 from src.tools.base import ToolContext
 from src.tools.python_repl import PythonReplTool
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_repl_subprocesses():
+    yield
+    for tool in list(PythonReplTool._active_tools):
+        await tool.close()
 
 
 def _ctx(chat_id: int = 1) -> ToolContext:
@@ -150,3 +158,64 @@ async def test_python_repl_registered_in_default_registry():
 
     reg = create_default_registry()
     assert reg.get("python_repl") is not None
+
+
+async def test_python_repl_credential_env_isolation(monkeypatch):
+    # Kredensial di proses utama tidak boleh tembus ke environment subprocess REPL
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:SECRET_TELEGRAM_TOKEN")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-SUPER_SECRET_KEY")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-SECRET")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+    monkeypatch.setenv("CUSTOM_BOT_SECRET", "super_secret_val_xyz")
+
+    tool = PythonReplTool()
+    res = await tool.execute(
+        _ctx(),
+        code=(
+            "import os\n"
+            "env_keys = list(os.environ.keys())\n"
+            "custom = os.environ.get('CUSTOM_BOT_SECRET')\n"
+            "has_secrets = any('KEY' in k or 'TOKEN' in k or 'SECRET' in k for k in env_keys)\n"
+            "print(f'has_secrets={has_secrets}, custom={custom}')"
+        ),
+    )
+    assert res.success
+    assert "has_secrets=False, custom=None" in res.output
+
+    # Cek bahwa token telegram jika dicari secara dinamis mengembalikan None
+    res2 = await tool.execute(
+        _ctx(),
+        code=(
+            "import os\n"
+            "k = 'TELEGRAM_' + 'BOT_' + 'TOKEN'\n"
+            "print('val:', os.environ.get(k))"
+        ),
+    )
+    assert res2.success
+    assert "val: None" in res2.output
+
+
+async def test_python_repl_memory_isolation_cannot_pollute_parent():
+    # Modifikasi runtime/sys di REPL tidak boleh memengaruhi memori proses bot
+    tool = PythonReplTool()
+    flag_name = "_faf_test_pwn_flag"
+    res = await tool.execute(_ctx(), code=f"import sys; sys.{flag_name} = True")
+    assert res.success
+    assert not hasattr(sys, flag_name)
+
+
+async def test_python_repl_cannot_import_project_internals():
+    # Subprocess REPL tidak boleh mengimpor modul internal bot
+    tool = PythonReplTool()
+    res = await tool.execute(_ctx(), code="import src.config")
+    assert not res.success
+    assert "ModuleNotFoundError" in res.error
+
+
+async def test_python_repl_hard_exit_does_not_crash_bot():
+    # Pemanggilan os._exit tidak boleh mematikan proses utama
+    tool = PythonReplTool()
+    res = await tool.execute(_ctx(), code="import os; os._exit(42)")
+    assert not res.success
+    assert "SystemExit" in res.error or "keluar" in res.error
+
