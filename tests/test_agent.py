@@ -1061,18 +1061,20 @@ async def test_web_screenshot_tool():
                 os.remove(res_mobile.media_path)
 
 
-def test_humanizer_prompt_configuration():
-    from src.core.agent import SYSTEM_PROMPT, FafAgent
+def test_humanizer_skill_structure():
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    skill_file = os.path.join(repo_root, "skills", "humanizer", "SKILL.md")
+    assert os.path.exists(skill_file), "SKILL.md should exist in skills/humanizer/"
 
-    agent = FafAgent()
-    history = agent.get_history(chat_id=12345)
-    sys_content = history[0]["content"]
+    with open(skill_file, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    assert "STANDAR HUMANIZER BAHASA INDONESIA" in sys_content
-    assert "Bukan hanya sekadar X, melainkan Y" in sys_content
-    assert "tak bisa dipungkiri" in sys_content
-    assert "perlu digarisbawahi" in sys_content
-    assert "trias paksa" in sys_content
+    assert "name: humanizer" in content
+    assert "Bukan X melainkan Y" in content
+    assert "tak bisa dipungkiri" in content.lower()
+    assert "perlu digarisbawahi" in content.lower()
+    assert "trias paksa" in content.lower()
+
 
 
 
