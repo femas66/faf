@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import tempfile
@@ -24,6 +25,7 @@ from src.tools.file_mgr import FileManagerTool
 from src.tools.device_interaction import DeviceInteractionTool
 from src.tools.reminder_mgr import ReminderManagerTool, ReminderStore, ReminderWorker
 from src.tools.web_screenshot import WebScreenshotTool
+from src.tools.media_downloader import MediaDownloaderTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -1074,6 +1076,137 @@ def test_humanizer_skill_structure():
     assert "tak bisa dipungkiri" in content.lower()
     assert "perlu digarisbawahi" in content.lower()
     assert "trias paksa" in content.lower()
+
+
+@pytest.mark.asyncio
+async def test_media_downloader_tool_full_flow():
+    tool = MediaDownloaderTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Action: check_environment
+    with patch("src.tools.media_downloader.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="yt-dlp 2024.04.09\n", stderr="", returncode=0, command="yt-dlp --version", executed_as_root=False
+        )
+        res_env = await tool.execute(ctx, action="check_environment")
+        assert res_env.success is True
+        assert "Status Mesin Unduh" in res_env.output
+
+    # 2. Action: list_downloads
+    with tempfile.TemporaryDirectory() as tmpdir:
+        res_list_empty = await tool.execute(ctx, action="list_downloads", output_dir=tmpdir)
+        assert res_list_empty.success is True
+        assert "Belum ada berkas" in res_list_empty.output
+
+        # Add a dummy downloaded file
+        dummy_f = os.path.join(tmpdir, "video_test.mp4")
+        with open(dummy_f, "wb") as f:
+            f.write(b"dummy video content 12345")
+
+        res_list_files = await tool.execute(ctx, action="list_downloads", output_dir=tmpdir)
+        assert res_list_files.success is True
+        assert "video_test.mp4" in res_list_files.output
+
+    # 3. Action: info validation
+    res_no_url = await tool.execute(ctx, action="info", url="")
+    assert res_no_url.success is False
+    assert "url" in res_no_url.error.lower()
+
+    # 4. Action: info with yt-dlp mock
+    with patch(
+        "src.tools.media_downloader._get_installed_engines",
+        return_value={"yt-dlp": "/usr/bin/yt-dlp", "aria2c": None, "ffmpeg": None, "curl": None, "wget": None},
+    ):
+        with patch("src.tools.media_downloader.bridge.execute_shell") as mock_exec:
+            mock_json = json.dumps(
+                {
+                    "title": "Tutorial Termux Python",
+                    "duration": 365,
+                    "uploader": "TermuxID",
+                    "view_count": 12500,
+                    "formats": [{"height": 1080}],
+                }
+            )
+            mock_exec.return_value = CommandResult(
+                stdout=mock_json, stderr="", returncode=0, command="...", executed_as_root=False
+            )
+            res_info = await tool.execute(ctx, action="info", url="https://www.youtube.com/watch?v=fake123")
+            assert res_info.success is True
+            assert "Tutorial Termux Python" in res_info.output
+            assert "TermuxID" in res_info.output
+            assert "06:05" in res_info.output
+
+    # 5. Action: direct_download with aria2c mock
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch(
+            "src.tools.media_downloader._get_installed_engines",
+            return_value={"yt-dlp": None, "aria2c": "/usr/bin/aria2c", "ffmpeg": None, "curl": None, "wget": None},
+        ):
+            with patch("src.tools.media_downloader.bridge.execute_shell") as mock_exec:
+                async def fake_aria(cmd, timeout=180):
+                    dest = os.path.join(tmpdir, "sample_document.pdf")
+                    with open(dest, "wb") as f:
+                        f.write(b"%PDF-1.4 fake pdf binary data")
+                    return CommandResult(
+                        stdout="Download complete", stderr="", returncode=0, command=cmd, executed_as_root=False
+                    )
+
+                mock_exec.side_effect = fake_aria
+                res_dl = await tool.execute(
+                    ctx,
+                    action="download",
+                    url="https://example.com/sample_document.pdf",
+                    output_dir=tmpdir,
+                    send_to_telegram=True,
+                )
+                assert res_dl.success is True
+                assert "Pengunduhan Berkas Selesai" in res_dl.output
+                assert res_dl.media_path is not None
+                assert res_dl.media_type == "document"
+                assert "aria2c" in res_dl.output
+
+    # 6. Action: media_extract (yt-dlp audio)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch(
+            "src.tools.media_downloader._get_installed_engines",
+            return_value={"yt-dlp": "/usr/bin/yt-dlp", "aria2c": None, "ffmpeg": None, "curl": None, "wget": None},
+        ):
+            with patch("src.tools.media_downloader.bridge.execute_shell") as mock_exec:
+                async def fake_ytdlp(cmd, timeout=180):
+                    dest = os.path.join(tmpdir, "lagu_keren.mp3")
+                    with open(dest, "wb") as f:
+                        f.write(b"ID3 fake audio mp3 bytes")
+                    return CommandResult(
+                        stdout="Destination: " + dest, stderr="", returncode=0, command=cmd, executed_as_root=False
+                    )
+
+                mock_exec.side_effect = fake_ytdlp
+                res_audio = await tool.execute(
+                    ctx,
+                    action="extract_audio",
+                    url="https://www.youtube.com/watch?v=audio123",
+                    output_dir=tmpdir,
+                    filename="lagu_keren.mp3",
+                )
+                assert res_audio.success is True
+                assert "lagu_keren.mp3" in res_audio.output
+                assert res_audio.media_path is not None
+                assert res_audio.media_type == "document"
+
+    # 7. Action: batch_download
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch.object(tool, "_action_download") as mock_dl_single:
+            mock_dl_single.return_value = ToolResult(success=True, output="Downloaded")
+            res_batch = await tool.execute(
+                ctx,
+                action="batch_download",
+                urls=["https://example.com/f1.zip", "https://example.com/f2.zip"],
+                output_dir=tmpdir,
+            )
+            assert res_batch.success is True
+            assert "Ringkasan Pengunduhan Batch" in res_batch.output
+            assert "2/2 Berhasil" in res_batch.output
+
 
 
 

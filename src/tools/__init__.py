@@ -12,6 +12,7 @@ from src.tools.file_mgr import FileManagerTool
 from src.tools.device_interaction import DeviceInteractionTool
 from src.tools.reminder_mgr import ReminderManagerTool
 from src.tools.web_screenshot import WebScreenshotTool
+from src.tools.media_downloader import MediaDownloaderTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -28,6 +29,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(DeviceInteractionTool())
     registry.register(ReminderManagerTool())
     registry.register(WebScreenshotTool())
+    registry.register(MediaDownloaderTool())
     return registry
 
 
@@ -50,6 +52,7 @@ __all__ = [
     "DeviceInteractionTool",
     "ReminderManagerTool",
     "WebScreenshotTool",
+    "MediaDownloaderTool",
     "create_default_registry",
     "default_registry",
 ]
