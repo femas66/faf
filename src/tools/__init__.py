@@ -16,6 +16,7 @@ from src.tools.media_downloader import MediaDownloaderTool
 from src.tools.ocr import OcrTool
 from src.tools.web_search import WebSearchTool
 from src.tools.memory_mgr import MemoryManagerTool
+from src.tools.python_repl import PythonReplTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -36,6 +37,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(OcrTool())
     registry.register(WebSearchTool())
     registry.register(MemoryManagerTool())
+    registry.register(PythonReplTool())
     return registry
 
 
@@ -62,6 +64,7 @@ __all__ = [
     "OcrTool",
     "WebSearchTool",
     "MemoryManagerTool",
+    "PythonReplTool",
     "create_default_registry",
     "default_registry",
 ]
