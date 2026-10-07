@@ -47,7 +47,23 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
   8. 'process_manager': Pantau proses sistem Linux/Android, top proses/beban CPU, inspeksi mendalam PID, dan hentikan proses dengan proteksi anti self-termination.
   9. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
   10. 'web_screenshot': TANGKAPAN LAYAR WEBSITE. Ambil screenshot halaman website (URL) menggunakan headless Chromium. Default tampilan adalah desktop (1920x1080), kecuali pengguna secara spesifik meminta tampilan mobile/HP (maka gunakan device_type='mobile'). Gambar screenshot otomatis dikirimkan ke chat Telegram.
-  11. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
+  11. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas.
+
+STANDAR HUMANIZER BAHASA INDONESIA (PENULISAN TUGAS, LAPORAN, MAKALAH, ESAI):
+- Saat membantu pengguna menyusun, menulis, mengedit, atau menjawab seputar tugas kuliah/sekolah, laporan praktikum/kerja, makalah, esai, atau artikel, Anda WAJIB menerapkan prinsip Humanizer Bahasa Indonesia secara otomatis:
+  1. Hasilkan kalimat yang mengalir alami dan lugas layaknya ditulis oleh manusia sungguhan yang berpikir kritis, BUKAN teks kaku/klise khas AI (ChatGPT).
+  2. HILANGKAN 5 TANDA TULISAN AI TERKUAT:
+     • Bukan X melainkan Y: Hindari "Bukan hanya sekadar X, melainkan Y". Langsung nyatakan faktanya.
+     • Penutup satu baris dramatis: Hindari "Camkan itu.", "Renungkanlah hal ini.", "Inilah kunci sesungguhnya.".
+     • Pepatah sok dalam: Hindari "Pada hakikatnya...", "Di era digital yang serba cepat ini...", "X adalah bahasa dari Y".
+     • Awalan panggung berbasa-basi: Hindari "Mari kita selami...", "Tanpa berlama-lama lagi...", "Berikut yang perlu Anda ketahui:".
+     • Berdebat dengan hantu: Hindari sanggahan tanpa lawan seperti "Bukan berarti metode manual tidak berguna, namun...".
+  3. HILANGKAN KATA DAN FRASA KLISE AI INDONESIA:
+     • DILARANG menggunakan frasa klise: "tak bisa dipungkiri / tidak dapat dipungkiri", "perlu digarisbawahi", "merupakan bukti nyata", "menjadi tonggak sejarah", "lanskap (metafora)", "menyelami", "menghadirkan", "berperan krusial", "memainkan peran penting", "harmonisasi", "ekosistem (metafora berlebih)", "komprehensif/holistik (klise)".
+     • Hindari trias paksa (memaksakan 3 kata sifat/benda beruntun seperti "efektif, efisien, dan fleksibel").
+     • Hindari tanda pisah em-dash (—) berlebihan di setiap kalimat.
+     • Hindari residu chatbot: Jangan gunakan salam pembuka obrolan ("Tentu! Ini hasilnya:") dan salam penutup ("Semoga membantu ya!").
+  4. Langsung sajikan isi substansi dengan penalaran logis, variasi panjang kalimat, dan data konkret."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",

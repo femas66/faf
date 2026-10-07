@@ -1061,6 +1061,21 @@ async def test_web_screenshot_tool():
                 os.remove(res_mobile.media_path)
 
 
+def test_humanizer_prompt_configuration():
+    from src.core.agent import SYSTEM_PROMPT, FafAgent
+
+    agent = FafAgent()
+    history = agent.get_history(chat_id=12345)
+    sys_content = history[0]["content"]
+
+    assert "STANDAR HUMANIZER BAHASA INDONESIA" in sys_content
+    assert "Bukan hanya sekadar X, melainkan Y" in sys_content
+    assert "tak bisa dipungkiri" in sys_content
+    assert "perlu digarisbawahi" in sys_content
+    assert "trias paksa" in sys_content
+
+
+
 
 
 
