@@ -10,6 +10,7 @@ from typing import Any
 from src.config import get_settings
 from src.core.ai_client import AIClient
 from src.core.android_bridge import bridge
+from src.core.memory_store import memory_store
 from src.tools.base import ToolContext, ToolRegistry, ToolResult
 from src.tools import default_registry
 
@@ -48,7 +49,14 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
   9. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
   10. 'web_screenshot': TANGKAPAN LAYAR WEBSITE. Ambil screenshot halaman website (URL) menggunakan headless Chromium. Default tampilan adalah desktop (1920x1080), kecuali pengguna secara spesifik meminta tampilan mobile/HP (maka gunakan device_type='mobile'). Gambar screenshot otomatis dikirimkan ke chat Telegram.
   11. 'media_downloader': PENGUNDUH MEDIA & BERKAS LENGKAP. Gunakan tool ini untuk mengunduh berkas langsung dari internet (HTTP/HTTPS via aria2c/curl/native), mengekstrak video atau audio/MP3 dari YouTube, TikTok, Instagram, Twitter/X, SoundCloud, dll. (via yt-dlp), memeriksa info metadata URL sebelum diunduh, unduh batch banyak tautan, unduh torrent/magnet, serta melihat riwayat berkas unduhan di perangkat (/sdcard/Download). Berkas <= 50MB otomatis dikirim ke Telegram pengguna.
-  12. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
+  12. 'ocr_extract': OCR LOKAL 100% OFFLINE. Ekstrak teks dari foto, gambar, dokumen, atau tangkapan layar langsung via Tesseract di Termux tanpa cloud/LLM.
+  13. 'web_search': RISET & PENELUSURAN WEB OTONOM. Cari web (search), baca isi halaman web bersih (visit), riset mendalam multi-sumber (deep_research), dan petakan tautan (extract_links).
+  14. 'memory_manager': MEMORI JANGKA PANJANG PERMANEN (HERMES-GRADE). Simpan fakta penting tentang pengguna (store), perbarui (update), cari (search), atau lihat (list). Fakta ini permanen di database lokal dan selalu diingat di setiap percakapan baru.
+  15. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas.
+
+PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
+- Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
+- Jangan pernah melupakan preferensi pengguna. Manfaatkan fakta yang tercantum di bagian [MEMORI PERMANEN & FAKTA PENGGUNA TERVERIFIKASI] secara alami dalam setiap respons tanpa perlu bertanya ulang."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",
@@ -128,18 +136,31 @@ class FafAgent:
         self._conversations: dict[int, list[dict[str, Any]]] = {}
         self._active_tasks: dict[int, asyncio.Task[Any]] = {}
 
+    def build_system_prompt(self) -> str:
+        """Construct system prompt with dynamically injected permanent memories."""
+        memory_block = memory_store.format_for_system_prompt()
+        if memory_block:
+            return f"{SYSTEM_PROMPT}\n\n{memory_block}"
+        return SYSTEM_PROMPT
+
     def get_history(self, chat_id: int) -> list[dict[str, Any]]:
-        """Retrieve conversation history for a given chat."""
+        """Retrieve conversation history for a given chat with refreshed memories."""
         if chat_id not in self._conversations:
             self._conversations[chat_id] = [
-                {"role": "system", "content": SYSTEM_PROMPT}
+                {"role": "system", "content": self.build_system_prompt()}
             ]
+        else:
+            # Refresh system prompt with latest stored facts
+            self._conversations[chat_id][0] = {
+                "role": "system",
+                "content": self.build_system_prompt(),
+            }
         return self._conversations[chat_id]
 
     def clear_history(self, chat_id: int) -> None:
-        """Clear conversation history, resetting to initial system prompt."""
+        """Clear conversation history, resetting to fresh system prompt with memories."""
         self._conversations[chat_id] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
+            {"role": "system", "content": self.build_system_prompt()}
         ]
         logger.info(f"Conversation history reset for chat_id={chat_id}")
 

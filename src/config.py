@@ -85,6 +85,10 @@ class Settings:
             get_val("temp_media_dir", "/data/data/com.termux/files/home/faf_media")
             or "/data/data/com.termux/files/home/faf_media"
         )
+        self.memory_db_path = str(
+            get_val("memory_db_path", "/data/data/com.termux/files/home/faf_memory.db")
+            or "/data/data/com.termux/files/home/faf_memory.db"
+        )
 
 
 # Global cached settings instance

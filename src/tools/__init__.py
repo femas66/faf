@@ -14,6 +14,8 @@ from src.tools.reminder_mgr import ReminderManagerTool
 from src.tools.web_screenshot import WebScreenshotTool
 from src.tools.media_downloader import MediaDownloaderTool
 from src.tools.ocr import OcrTool
+from src.tools.web_search import WebSearchTool
+from src.tools.memory_mgr import MemoryManagerTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -32,6 +34,8 @@ def create_default_registry() -> ToolRegistry:
     registry.register(WebScreenshotTool())
     registry.register(MediaDownloaderTool())
     registry.register(OcrTool())
+    registry.register(WebSearchTool())
+    registry.register(MemoryManagerTool())
     return registry
 
 
@@ -56,6 +60,8 @@ __all__ = [
     "WebScreenshotTool",
     "MediaDownloaderTool",
     "OcrTool",
+    "WebSearchTool",
+    "MemoryManagerTool",
     "create_default_registry",
     "default_registry",
 ]
