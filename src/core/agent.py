@@ -46,7 +46,8 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
   7. 'package_manager': Daftar aplikasi (3rd-party/system), buka aplikasi via nama/paket, info versi/APK, cek aplikasi yang sedang aktif di layar (current_app), force stop, enable/disable, clear data, dan uninstall.
   8. 'process_manager': Pantau proses sistem Linux/Android, top proses/beban CPU, inspeksi mendalam PID, dan hentikan proses dengan proteksi anti self-termination.
   9. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
-  10. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
+  10. 'web_screenshot': TANGKAPAN LAYAR WEBSITE. Ambil screenshot halaman website (URL) menggunakan headless Chromium. Default tampilan adalah desktop (1920x1080), kecuali pengguna secara spesifik meminta tampilan mobile/HP (maka gunakan device_type='mobile'). Gambar screenshot otomatis dikirimkan ke chat Telegram.
+  11. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",

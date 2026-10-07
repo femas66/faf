@@ -23,6 +23,7 @@ from src.tools.time_mgr import TimeManagerTool
 from src.tools.file_mgr import FileManagerTool
 from src.tools.device_interaction import DeviceInteractionTool
 from src.tools.reminder_mgr import ReminderManagerTool, ReminderStore, ReminderWorker
+from src.tools.web_screenshot import WebScreenshotTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -39,6 +40,7 @@ def setup_test_settings():
         ENABLE_ROOT_COMMANDS=True,
         SECURITY_CONFIRMATION_TIMEOUT=5,
         COMMAND_TIMEOUT=5,
+        TEMP_MEDIA_DIR=os.path.join(tempfile.gettempdir(), "faf_test_media"),
     )
     set_settings(test_settings)
     return test_settings
@@ -968,6 +970,96 @@ async def test_reminder_manager_tool_full_flow():
 
         # Clean up worker
         worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_web_screenshot_tool():
+    tool = WebScreenshotTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Action: check_browser (when installed)
+    with patch("src.tools.web_screenshot._find_browser_binary", return_value="/data/data/com.termux/files/usr/bin/chromium"):
+        with patch("src.tools.web_screenshot.bridge.execute_shell") as mock_exec:
+            mock_exec.return_value = CommandResult(
+                stdout="Chromium 124.0.6367.60",
+                stderr="",
+                returncode=0,
+                command="/data/data/com.termux/files/usr/bin/chromium --version",
+                executed_as_root=False,
+            )
+            res_chk = await tool.execute(ctx, action="check_browser")
+            assert res_chk.success is True
+            assert "Chromium 124.0.6367.60" in res_chk.output
+
+    # 2. Action: check_browser (when missing)
+    with patch("src.tools.web_screenshot._find_browser_binary", return_value=None):
+        res_chk_missing = await tool.execute(ctx, action="check_browser")
+        assert res_chk_missing.success is False
+        assert "pkg install" in res_chk_missing.error
+
+    # 3. Action: capture (validation error: missing url)
+    res_no_url = await tool.execute(ctx, action="capture", url="")
+    assert res_no_url.success is False
+    assert "url" in res_no_url.error.lower()
+
+    # 4. Action: capture (desktop mode)
+    with patch("src.tools.web_screenshot._find_browser_binary", return_value="/usr/bin/chromium"):
+        with patch("src.tools.web_screenshot.bridge.execute_shell") as mock_exec:
+            async def fake_execute(cmd, timeout=30):
+                import re
+                m = re.search(r"--screenshot=['\"]?([^'\"\s]+)['\"]?", cmd)
+                if m:
+                    out_path = m.group(1)
+                    with open(out_path, "wb") as f:
+                        f.write(b"\x89PNG\r\n\x1a\nfake_image_bytes")
+                return CommandResult(stdout="", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+            mock_exec.side_effect = fake_execute
+
+            res_desktop = await tool.execute(ctx, action="capture", url="https://example.com")
+            assert res_desktop.success is True
+            assert "Desktop (1920x1080 FHD)" in res_desktop.output
+            assert res_desktop.media_path is not None
+            assert res_desktop.media_type == "photo"
+            assert os.path.exists(res_desktop.media_path)
+            # Verify command contained desktop parameters
+            last_cmd = mock_exec.call_args[0][0]
+            assert "--window-size=1920,1080" in last_cmd
+            assert "Windows NT" in last_cmd
+
+            # Clean up created file
+            if os.path.exists(res_desktop.media_path):
+                os.remove(res_desktop.media_path)
+
+    # 5. Action: capture (mobile mode)
+    with patch("src.tools.web_screenshot._find_browser_binary", return_value="/usr/bin/chromium"):
+        with patch("src.tools.web_screenshot.bridge.execute_shell") as mock_exec:
+            async def fake_execute_mobile(cmd, timeout=30):
+                import re
+                m = re.search(r"--screenshot=['\"]?([^'\"\s]+)['\"]?", cmd)
+                if m:
+                    out_path = m.group(1)
+                    with open(out_path, "wb") as f:
+                        f.write(b"\x89PNG\r\n\x1a\nfake_image_mobile_bytes")
+                return CommandResult(stdout="", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+            mock_exec.side_effect = fake_execute_mobile
+
+            res_mobile = await tool.execute(ctx, action="capture", url="https://example.com", device_type="mobile")
+            assert res_mobile.success is True
+            assert "Mobile Android (412x915 Portrait)" in res_mobile.output
+            assert res_mobile.media_path is not None
+            assert res_mobile.media_type == "photo"
+            assert os.path.exists(res_mobile.media_path)
+            # Verify command contained mobile parameters
+            last_cmd_mobile = mock_exec.call_args[0][0]
+            assert "--window-size=412,915" in last_cmd_mobile
+            assert "Android" in last_cmd_mobile
+
+            # Clean up created file
+            if os.path.exists(res_mobile.media_path):
+                os.remove(res_mobile.media_path)
+
 
 
 
