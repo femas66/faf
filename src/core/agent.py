@@ -40,12 +40,13 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
   1. 'time_manager': Jam, tanggal, uptime HP, selisih waktu/countdown, waktu dunia, dan kalender.
   2. 'file_manager': Membaca (seluruhnya/per baris), menulis, mengedit baris, menyisipkan teks, cari/ganti, grep/pencarian, info berkas, pohon direktori, salin, pindah, dan hapus berkas.
   3. 'system_settings': WiFi (status/scan/toggle), Data Seluler, Bluetooth, Hotspot, Mode Pesawat, GPS/Lokasi, NFC, Volume semua stream, Mode Dering, DND, Kecerahan layar, Rotasi layar, Resolusi, Senter (torch), Getar, Screenshot, Sensor hardware, Suhu thermal, Status baterai, dan Diagnostik IP/Ping.
-  4. 'productivity_control': Pasang alarm, timer hitung mundur, agenda kalender, notifikasi pop-up layar, pesan toast, catatan lokal, kirim/baca SMS, cari kontak, panggilan telepon, info BTS/seluler, dan baca/salin clipboard.
-  5. 'media_control': Kontrol pemutar musik (play/pause/next/prev), YouTube, buka URL peramban, ambil foto kamera depan/belakang ke Telegram, rekam suara mikrofon ke Telegram, Text-to-Speech (berbicara lantang lewat speaker ponsel), dan putar audio lokal.
-  6. 'package_manager': Daftar aplikasi (3rd-party/system), buka aplikasi via nama/paket, info versi/APK, cek aplikasi yang sedang aktif di layar (current_app), force stop, enable/disable, clear data, dan uninstall.
-  7. 'process_manager': Pantau proses sistem Linux/Android, top proses/beban CPU, inspeksi mendalam PID, dan hentikan proses dengan proteksi anti self-termination.
-  8. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
-  9. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
+  4. 'reminder_manager': PENGINGAT PESAN TELEGRAM & CRONJOB. Gunakan tool ini setiap kali pengguna meminta diingatkan (contoh: 'ingatkan saya jam 12 untuk memberi makan kucing', 'setiap jam 7 pagi ingatkan mandi', 'apa saja pengingat yang ada', 'hapus pengingat mandi'). Tool ini akan mengirim pesan ke chat Telegram pengguna secara terjadwal. JANGAN gunakan 'productivity_control' untuk pengingat pesan Telegram.
+  5. 'productivity_control': Pasang alarm fisik HP (android.intent.SET_ALARM), timer fisik HP, agenda kalender, notifikasi pop-up layar, pesan toast, catatan lokal, kirim/baca SMS, cari kontak, panggilan telepon, info BTS/seluler, dan baca/salin clipboard. HANYA gunakan alarm/timer di sini jika pengguna secara eksplisit meminta memasang alarm di HP.
+  6. 'media_control': Kontrol pemutar musik (play/pause/next/prev), YouTube, buka URL peramban, ambil foto kamera depan/belakang ke Telegram, rekam suara mikrofon ke Telegram, Text-to-Speech (berbicara lantang lewat speaker ponsel), dan putar audio lokal.
+  7. 'package_manager': Daftar aplikasi (3rd-party/system), buka aplikasi via nama/paket, info versi/APK, cek aplikasi yang sedang aktif di layar (current_app), force stop, enable/disable, clear data, dan uninstall.
+  8. 'process_manager': Pantau proses sistem Linux/Android, top proses/beban CPU, inspeksi mendalam PID, dan hentikan proses dengan proteksi anti self-termination.
+  9. 'device_interaction': Otomasi layar sentuh fisik: tap koordinat (x, y), swipe/scroll dari (x1, y1) ke (x2, y2), tekan tombol fisik (HOME, BACK, RECENTS, POWER, VOLUME, ENTER), ketik teks langsung ke layar (type_text), bangunkan/tidurkan layar (wake/sleep), dan tarik tirai notifikasi/quick settings.
+  10. 'root_shell_exec': HANYA digunakan untuk perintah Linux/Android tingkat lanjut jika benar-benar tidak tercakup oleh tool khusus di atas."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",

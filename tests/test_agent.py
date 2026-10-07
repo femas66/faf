@@ -22,6 +22,7 @@ from src.tools.process_mgr import ProcessManagerTool
 from src.tools.time_mgr import TimeManagerTool
 from src.tools.file_mgr import FileManagerTool
 from src.tools.device_interaction import DeviceInteractionTool
+from src.tools.reminder_mgr import ReminderManagerTool, ReminderStore, ReminderWorker
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -891,6 +892,83 @@ async def test_expanded_system_and_productivity_tools():
         res_cb_get = await prod_tool.execute(ctx, action="clipboard_get")
         assert res_cb_get.success is True
         assert "Isi teks clipboard rahasia" in res_cb_get.output
+
+
+@pytest.mark.asyncio
+async def test_reminder_manager_tool_full_flow():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_file = os.path.join(tmpdir, "test_reminders.json")
+        store = ReminderStore(file_path=store_file)
+        worker = ReminderWorker(store)
+        tool = ReminderManagerTool(store=store, worker=worker)
+        ctx = ToolContext(chat_id=12345, user_id=67890)
+
+        # 1. Create one-shot reminder ("Memberi makan kucing" at 12:00)
+        res_cat = await tool.execute(
+            ctx,
+            action="create",
+            message="Memberi makan kucing",
+            time="12:00",
+            is_recurring=False,
+        )
+        assert res_cat.success is True
+        assert "Memberi makan kucing" in res_cat.output
+        assert "Pengingat Telegram Berhasil Dibuat" in res_cat.output
+
+        # 2. Create recurring cronjob reminder ("Mandi pagi" every day at 07:00)
+        res_bath = await tool.execute(
+            ctx,
+            action="create",
+            message="Mandi pagi",
+            time="07:00",
+            is_recurring=True,
+            frequency="daily",
+        )
+        assert res_bath.success is True
+        assert "Mandi pagi" in res_bath.output
+        assert "Cronjob" in res_bath.output
+
+        # 3. List active reminders
+        res_list = await tool.execute(ctx, action="list")
+        assert res_list.success is True
+        assert "Memberi makan kucing" in res_list.output
+        assert "Mandi pagi" in res_list.output
+        assert "2 jadwal" in res_list.output
+
+        # 4. Cancel reminder by search keyword ("kucing")
+        res_cancel = await tool.execute(ctx, action="cancel", search_query="kucing")
+        assert res_cancel.success is True
+        assert "Berhasil Dibatalkan & Dihapus" in res_cancel.output
+        assert "Memberi makan kucing" in res_cancel.output
+
+        # 5. List again, verify "kucing" is gone and only "Mandi pagi" remains
+        res_list_after = await tool.execute(ctx, action="list")
+        assert res_list_after.success is True
+        assert "Memberi makan kucing" not in res_list_after.output
+        assert "Mandi pagi" in res_list_after.output
+        assert "1 jadwal" in res_list_after.output
+
+        # 6. Test background worker dispatch simulation
+        worker_items = await store.list_all()
+        assert len(worker_items) == 1
+        rem_item = worker_items[0]
+
+        with patch("src.tools.reminder_mgr.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_resp = MagicMock(status_code=200)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+            sent = await worker._send_telegram_notification(chat_id=12345, rem=rem_item)
+            assert sent is True
+            mock_client.post.assert_called_once()
+            call_json = mock_client.post.call_args[1]["json"]
+            assert call_json["chat_id"] == 12345
+            assert "Mandi pagi" in call_json["text"]
+
+        # Clean up worker
+        worker.stop()
+
 
 
 

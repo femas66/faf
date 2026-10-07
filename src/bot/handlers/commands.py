@@ -78,6 +78,24 @@ async def handle_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 @authorized_only
+async def handle_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /reminders: shows all active scheduled reminders and cronjobs."""
+    if not update.effective_message:
+        return
+    status_msg = await update.effective_message.reply_text("● Mengambil daftar pengingat...")
+    tool = default_registry.get("reminder_manager")
+    if tool:
+        ctx = ToolContext(
+            chat_id=update.effective_chat.id if update.effective_chat else 0,
+            user_id=update.effective_user.id if update.effective_user else 0,
+        )
+        res = await tool.execute(ctx, action="list")
+        await status_msg.edit_text(res.output)
+    else:
+        await status_msg.edit_text("Tool reminder_manager tidak ditemukan.")
+
+
+@authorized_only
 async def handle_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /top: shows top processes by CPU and RAM in clean plain text."""
     if not update.effective_message:

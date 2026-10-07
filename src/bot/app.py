@@ -16,6 +16,7 @@ from src.bot.handlers.commands import (
     handle_start,
     handle_help,
     handle_time,
+    handle_reminders,
     handle_device,
     handle_battery,
     handle_top,
@@ -28,6 +29,7 @@ from src.bot.handlers.commands import (
     handle_callback_query,
 )
 from src.bot.handlers.chat import handle_chat_message
+from src.tools.reminder_mgr import _default_worker
 
 logger = logging.getLogger("faf_agent")
 
@@ -40,13 +42,19 @@ def create_application() -> Application:
         logger.error("TELEGRAM_BOT_TOKEN is not configured! Please set it in your .env file.")
         sys.exit(1)
 
-    app = ApplicationBuilder().token(settings.telegram_bot_token).build()
+    async def on_startup(application: Application) -> None:
+        _default_worker.start()
+        logger.info("Reminder background worker activated in application.")
+
+    app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(on_startup).build()
 
     # Register Slash Command Handlers
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(CommandHandler("help", handle_help))
     app.add_handler(CommandHandler("time", handle_time))
     app.add_handler(CommandHandler("jam", handle_time))
+    app.add_handler(CommandHandler("reminders", handle_reminders))
+    app.add_handler(CommandHandler("pengingat", handle_reminders))
     app.add_handler(CommandHandler("device", handle_device))
     app.add_handler(CommandHandler("battery", handle_battery))
     app.add_handler(CommandHandler("top", handle_top))
