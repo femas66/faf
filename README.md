@@ -69,12 +69,18 @@ faf-agent/
 │       ├── root_exec.py      # root_shell_exec tool
 │       ├── system.py         # system_settings tool (wifi, torch, volume, dnd, dll.)
 │       ├── productivity.py   # productivity_control tool (alarm, timer, note, dll.)
-│       ├── media.py          # media_control tool (playback, camera, youtube)
-│       ├── package_mgr.py    # package_manager tool (list apps, open app)
-│       └── process_mgr.py    # process_manager tool (list processes, kill)
+│       ├── reminder_mgr.py   # reminder_manager tool
+│       ├── web_screenshot.py # web_screenshot tool (Chromium headless)
+│       ├── media_downloader.py # media_downloader tool (yt-dlp)
+│       ├── ocr.py            # ocr_extract tool (Tesseract / AI Vision)
+│       └── file_mgr.py       # file_manager tool
+├── skills/                   # Agent Skills (Troubleshooter, Humanizer, dll.)
+│   ├── android-troubleshooter/
+│   └── humanizer-id/
 └── tests/
     ├── __init__.py
-    └── test_agent.py         # Test suite komprehensif
+    ├── test_agent.py         # Test suite komprehensif
+    └── test_ocr.py           # Test suite OCR tool
 ```
 
 ---
