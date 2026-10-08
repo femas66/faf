@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
 import sys
+import tempfile
+import telegram.error
 from telegram.ext import (
     Application,
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters,
 )
 
@@ -34,6 +39,63 @@ from src.tools.reminder_mgr import _default_worker
 logger = logging.getLogger("faf_agent")
 
 
+class SingleInstanceLock:
+    """Mencegah multiple instance faf-agent berjalan bersamaan di satu perangkat."""
+
+    def __init__(self, lock_file: str | None = None) -> None:
+        temp_dir = tempfile.gettempdir()
+        self.lock_file = lock_file or os.path.join(temp_dir, "faf_agent.lock")
+        self.fd: int | None = None
+
+    def acquire(self) -> bool:
+        try:
+            self.fd = os.open(self.lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.ftruncate(self.fd, 0)
+            os.write(self.fd, f"{os.getpid()}\n".encode("utf-8"))
+            return True
+        except (BlockingIOError, OSError):
+            return False
+
+    def get_running_pid(self) -> int | None:
+        try:
+            with open(self.lock_file, "r") as f:
+                content = f.read().strip()
+                if content.isdigit():
+                    return int(content)
+        except Exception:
+            pass
+        return None
+
+    def release(self) -> None:
+        if self.fd is not None:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                os.close(self.fd)
+            except Exception:
+                pass
+            self.fd = None
+        try:
+            if os.path.exists(self.lock_file):
+                os.unlink(self.lock_file)
+        except Exception:
+            pass
+
+
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tangani error tak terduga dari polling Telegram."""
+    error = context.error
+    if isinstance(error, telegram.error.Conflict):
+        logger.critical(
+            "❌ [409 CONFLICT] Instance bot lain terdeteksi sedang polling dengan token yang sama! "
+            "Telegram membatalkan getUpdates. Pastikan Anda hanya menjalankan bot di 1 tempat (cek tmux, background terminal, atau perangkat lain)."
+        )
+    elif isinstance(error, telegram.error.NetworkError):
+        logger.warning(f"Koneksi jaringan Telegram terganggu: {error}")
+    else:
+        logger.error(f"Telegram Application Error: {error}", exc_info=error)
+
+
 def create_application() -> Application:
     """Create and configure python-telegram-bot Application instance."""
     settings = get_settings()
@@ -47,6 +109,9 @@ def create_application() -> Application:
         logger.info("Reminder background worker activated in application.")
 
     app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(on_startup).build()
+
+    # Register Global Error Handler
+    app.add_error_handler(global_error_handler)
 
     # Register Slash Command Handlers
     app.add_handler(CommandHandler("start", handle_start))
@@ -88,6 +153,21 @@ def main() -> None:
             "ALLOWED_TELEGRAM_USER_IDS is empty! All incoming messages will be rejected by default."
         )
 
+    lock = SingleInstanceLock()
+    if not lock.acquire():
+        running_pid = lock.get_running_pid()
+        pid_info = f" (PID: {running_pid})" if running_pid else ""
+        logger.critical(
+            f"❌ GAGAL MEMULAI: Instance faf-agent lain sudah aktif di perangkat ini{pid_info}!\n"
+            "Menjalankan 2 instance bot bersamaan menyebabkan error '409 Conflict' dari Telegram "
+            "dan membuat tombol konfirmasi (Setujui/Tolak) tidak merespons.\n"
+            "Solusi: Hentikan instance lama terlebih dahulu dengan perintah:\n"
+            f"  kill -9 {running_pid if running_pid else '<PID>'}\n"
+            "atau:\n"
+            "  pkill -f main.py"
+        )
+        sys.exit(1)
+
     logger.info("Initializing faf-agent Telegram Bot (Pure Python / Zero Maturin)...")
     app = create_application()
 
@@ -96,6 +176,8 @@ def main() -> None:
         app.run_polling()
     except (KeyboardInterrupt, SystemExit):
         logger.info("faf-agent stopped by user.")
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":
