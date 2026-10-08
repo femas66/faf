@@ -108,33 +108,39 @@ def create_application() -> Application:
         _default_worker.start()
         logger.info("Reminder background worker activated in application.")
 
-    app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(on_startup).build()
+    app = (
+        ApplicationBuilder()
+        .token(settings.telegram_bot_token)
+        .post_init(on_startup)
+        .concurrent_updates(True)
+        .build()
+    )
 
     # Register Global Error Handler
     app.add_error_handler(global_error_handler)
 
     # Register Slash Command Handlers
-    app.add_handler(CommandHandler("start", handle_start))
-    app.add_handler(CommandHandler("help", handle_help))
-    app.add_handler(CommandHandler("time", handle_time))
-    app.add_handler(CommandHandler("jam", handle_time))
-    app.add_handler(CommandHandler("reminders", handle_reminders))
-    app.add_handler(CommandHandler("pengingat", handle_reminders))
-    app.add_handler(CommandHandler("device", handle_device))
-    app.add_handler(CommandHandler("battery", handle_battery))
-    app.add_handler(CommandHandler("top", handle_top))
-    app.add_handler(CommandHandler("apps", handle_apps))
-    app.add_handler(CommandHandler("wifi", handle_wifi))
-    app.add_handler(CommandHandler("ping", handle_ping))
-    app.add_handler(CommandHandler("su", handle_su_direct))
-    app.add_handler(CommandHandler("cancel", handle_cancel))
-    app.add_handler(CommandHandler("clear", handle_clear))
+    app.add_handler(CommandHandler("start", handle_start, block=False))
+    app.add_handler(CommandHandler("help", handle_help, block=False))
+    app.add_handler(CommandHandler("time", handle_time, block=False))
+    app.add_handler(CommandHandler("jam", handle_time, block=False))
+    app.add_handler(CommandHandler("reminders", handle_reminders, block=False))
+    app.add_handler(CommandHandler("pengingat", handle_reminders, block=False))
+    app.add_handler(CommandHandler("device", handle_device, block=False))
+    app.add_handler(CommandHandler("battery", handle_battery, block=False))
+    app.add_handler(CommandHandler("top", handle_top, block=False))
+    app.add_handler(CommandHandler("apps", handle_apps, block=False))
+    app.add_handler(CommandHandler("wifi", handle_wifi, block=False))
+    app.add_handler(CommandHandler("ping", handle_ping, block=False))
+    app.add_handler(CommandHandler("su", handle_su_direct, block=False))
+    app.add_handler(CommandHandler("cancel", handle_cancel, block=False))
+    app.add_handler(CommandHandler("clear", handle_clear, block=False))
 
     # Register Callback Query Handler (Inline buttons)
-    app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_handler(CallbackQueryHandler(handle_callback_query, block=False))
 
     # Register Natural Language Chat Handler
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_chat_message))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_chat_message, block=False))
 
     return app
 

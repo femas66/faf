@@ -257,32 +257,38 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     data = query.data or ""
+    logger.info(f"Callback query received: '{data}'")
 
     if data.startswith("approve:"):
         req_id = data.split(":", 1)[1]
         success = await permission_manager.resolve_confirmation(req_id, approved=True)
         if success:
+            logger.info(f"Confirmation {req_id} approved by user.")
             await query.answer("Operasi disetujui. Melanjutkan...")
             if query.message:
                 await query.edit_message_text(
                     f"{clean_plain_chat_text(query.message.text or '')}\n\nStatus: Telah Disetujui."
                 )
         else:
+            logger.warning(f"Confirmation {req_id} resolution failed (expired or already resolved).")
             await query.answer("Permintaan sudah kedaluwarsa atau telah diproses.", show_alert=True)
 
     elif data.startswith("reject:"):
         req_id = data.split(":", 1)[1]
         success = await permission_manager.resolve_confirmation(req_id, approved=False)
         if success:
+            logger.info(f"Confirmation {req_id} rejected by user.")
             await query.answer("Operasi ditolak dan dihentikan.")
             if query.message:
                 await query.edit_message_text(
                     f"{clean_plain_chat_text(query.message.text or '')}\n\nStatus: Telah Ditolak."
                 )
         else:
+            logger.warning(f"Confirmation {req_id} resolution failed (expired or already resolved).")
             await query.answer("Permintaan sudah kedaluwarsa atau telah diproses.", show_alert=True)
 
     elif data == "cancel_task":
+        logger.info("Cancel task callback received.")
         if query.message and query.message.chat:
             await agent.cancel_task(query.message.chat.id)
         await bridge.cancel_all_subprocesses()
