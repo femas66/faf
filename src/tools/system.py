@@ -67,8 +67,10 @@ class SystemSettingsTool(BaseTool):
                     "thermal",
                     "battery",
                     "network",
+                    "doctor",
+                    "check_tools",
                 ],
-                "description": "Pengaturan sistem atau diagnosa yang ingin diakses.",
+                "description": "Pengaturan sistem atau diagnosa yang ingin diakses ('doctor' atau 'check_tools' untuk memeriksa kelengkapan instalasi seluruh tools).",
             },
             "sub_action": {
                 "type": "string",
@@ -610,5 +612,13 @@ class SystemSettingsTool(BaseTool):
                 if res.success:
                     return ToolResult(success=True, output=f"Hasil Ping ke {host}:\n{res.stdout}")
                 return ToolResult(success=False, output=res.stdout, error=f"Ping gagal ke {host}: {res.stderr}")
+
+        # -------------------------------------------------------------------
+        # 21. Action: DOCTOR / CHECK_TOOLS (System Tool Diagnostics)
+        # -------------------------------------------------------------------
+        elif action in ("doctor", "check_tools", "check_dependencies", "check_deps"):
+            from src.core.diagnostics import check_all_dependencies, format_dependency_report
+            diag_results = check_all_dependencies()
+            return ToolResult(success=True, output=format_dependency_report(diag_results))
 
         return ToolResult(success=False, output="", error=f"Aksi system_settings '{action}' tidak dikenal.")

@@ -131,7 +131,11 @@ class FileManagerTool(BaseTool):
             },
             "path": {
                 "type": "string",
-                "description": "Path berkas atau direktori target (contoh: '/sdcard/Notes/todo.txt' atau 'src/core/agent.py').",
+                "description": (
+                    "Path berkas atau direktori target (contoh: '/sdcard/Notes/todo.txt' atau 'src/core/agent.py'). "
+                    "WAJIB menyertakan lokasi folder/direktori. JANGAN menebak path jika lokasi folder belum ditentukan "
+                    "oleh pengguna, melainkan tanyakan klarifikasi terlebih dahulu."
+                ),
             },
             "source_path": {
                 "type": "string",
@@ -346,6 +350,18 @@ class FileManagerTool(BaseTool):
             if not target_path:
                 return ToolResult(success=False, output="", error="Parameter 'path' wajib diisi untuk aksi write.")
 
+            # Ambiguity guard: check for bare filename without directory
+            if not any(sep in path_arg for sep in ("/", "\\", "~")):
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"Lokasi folder target untuk '{path_arg}' belum ditentukan (ambigu). "
+                        "Tanyakan klarifikasi kepada pengguna di direktori mana berkas ingin disimpan "
+                        "(misalnya di direktori home Termux ~/ atau penyimpanan internal /sdcard)."
+                    ),
+                )
+
             # Security check
             is_exfil, exfil_reason = permission_manager.check_credential_exfiltration(target_path)
             if is_exfil:
@@ -389,6 +405,18 @@ class FileManagerTool(BaseTool):
         elif action == "append":
             if not target_path:
                 return ToolResult(success=False, output="", error="Parameter 'path' wajib diisi untuk aksi append.")
+
+            # Ambiguity guard: check for bare filename without directory
+            if not any(sep in path_arg for sep in ("/", "\\", "~")):
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"Lokasi folder target untuk '{path_arg}' belum ditentukan (ambigu). "
+                        "Tanyakan klarifikasi kepada pengguna di direktori mana berkas ingin ditambahkan teks "
+                        "(misalnya di direktori home Termux ~/ atau penyimpanan internal /sdcard)."
+                    ),
+                )
 
             # Security check
             is_exfil, exfil_reason = permission_manager.check_credential_exfiltration(target_path)

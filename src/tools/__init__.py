@@ -17,11 +17,15 @@ from src.tools.ocr import OcrTool
 from src.tools.web_search import WebSearchTool
 from src.tools.memory_mgr import MemoryManagerTool
 from src.tools.python_repl import PythonReplTool
+from src.tools.clarification import ClarificationTool
+from src.tools.cronjob_mgr import CronJobTool
+from src.tools.weather_mgr import WeatherForecastTool
 
 
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry with all Android tools."""
     registry = ToolRegistry()
+    registry.register(ClarificationTool())
     registry.register(RootShellExecTool())
     registry.register(SystemSettingsTool())
     registry.register(ProductivityControlTool())
@@ -32,6 +36,8 @@ def create_default_registry() -> ToolRegistry:
     registry.register(FileManagerTool())
     registry.register(DeviceInteractionTool())
     registry.register(ReminderManagerTool())
+    registry.register(CronJobTool())
+    registry.register(WeatherForecastTool())
     registry.register(WebScreenshotTool())
     registry.register(MediaDownloaderTool())
     registry.register(OcrTool())
@@ -49,6 +55,7 @@ __all__ = [
     "ToolContext",
     "ToolResult",
     "ToolRegistry",
+    "ClarificationTool",
     "RootShellExecTool",
     "SystemSettingsTool",
     "ProductivityControlTool",
@@ -59,6 +66,8 @@ __all__ = [
     "FileManagerTool",
     "DeviceInteractionTool",
     "ReminderManagerTool",
+    "CronJobTool",
+    "WeatherForecastTool",
     "WebScreenshotTool",
     "MediaDownloaderTool",
     "OcrTool",
@@ -68,3 +77,5 @@ __all__ = [
     "create_default_registry",
     "default_registry",
 ]
+
+

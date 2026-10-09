@@ -32,11 +32,14 @@ from src.bot.handlers.commands import (
     handle_cancel,
     handle_clear,
     handle_callback_query,
+    handle_doctor,
 )
 from src.bot.handlers.chat import handle_chat_message
 from src.tools.reminder_mgr import _default_worker
+from src.tools.cronjob_mgr import _default_cron_worker
 
 logger = logging.getLogger("faf_agent")
+
 
 
 class SingleInstanceLock:
@@ -106,7 +109,8 @@ def create_application() -> Application:
 
     async def on_startup(application: Application) -> None:
         _default_worker.start()
-        logger.info("Reminder background worker activated in application.")
+        _default_cron_worker.start()
+        logger.info("Reminder and CronJob background workers activated in application.")
 
     app = (
         ApplicationBuilder()
@@ -135,6 +139,8 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("su", handle_su_direct, block=False))
     app.add_handler(CommandHandler("cancel", handle_cancel, block=False))
     app.add_handler(CommandHandler("clear", handle_clear, block=False))
+    app.add_handler(CommandHandler("doctor", handle_doctor, block=False))
+    app.add_handler(CommandHandler("check", handle_doctor, block=False))
 
     # Register Callback Query Handler (Inline buttons)
     app.add_handler(CallbackQueryHandler(handle_callback_query, block=False))

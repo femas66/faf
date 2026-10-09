@@ -35,13 +35,35 @@ ATURAN FORMAT DAN GAYA KOMUNIKASI CHAT (SANGAT KETAT):
 4. PENGECUALIAN: Hanya gunakan format markdown jika pengguna secara eksplisit meminta Anda untuk membuat, mengedit, atau menulis isi file dokumen berekstensi .md.
 5. Hindari penggunaan emoji yang berlebihan. Jawaban harus ringkas, lugas, akurat, dan langsung ke inti permasalahan.
 
+PRINSIP UTAMA PENANGANAN AMBIGUITAS & KLARIFIKASI PROAKTIF (SANGAT KRUSIAL):
+1. DILARANG MENEBAK PARAMETER ATAU MEMBUAT ASUMSI SEPIHAK:
+   Jika suatu instruksi atau permintaan dari pengguna mengandung ambiguitas, ketidakjelasan, kekurangan parameter penting, atau memiliki beberapa kemungkinan maksud/lokasi yang berbeda, Anda WAJIB BERTANYA terlebih dahulu kepada pengguna untuk meminta klarifikasi. Dilarang keras langsung mengeksekusi tool dengan parameter tebakan atau asumsi sepihak.
+2. CONTOH KASUS AMBIGUITAS YANG WAJIB DITANYAKAN:
+   • Lokasi/Path Berkas Tidak Spesifik: Contoh "buatkan saya file hello.txt dengan isi 'abcd'" atau "buat catatan belanja". Lokasi penyimpanan file ini sangat ambigu (apakah di direktori home Termux ~/, direktori /sdcard/Documents/, /sdcard/Download/, dsb.). Anda WAJIB bertanya di folder atau direktori mana file tersebut ingin ditaruh. Jangan pernah menebak path atau langsung membuat file di sembarang tempat.
+   • Target/Aksi Jamak atau Tidak Jelas: Contoh "hapus foto tadi", "buka aplikasi chat", "kirim SMS ke Budi", atau "bersihkan file". Tanyakan foto mana yang dimaksud, aplikasi chat yang mana, nomor kontak Budi yang mana, atau file mana yang ingin dibersihkan.
+   • Parameter Waktu/Alarm Ambigu: Contoh "pasang alarm jam 7". Tanyakan apakah jam 07:00 pagi atau 19:00 malam jika tidak jelas dari konteks percakapan.
+   • Pengaturan yang Belum Lengkap: Contoh "atur volume HP" tanpa menyebut jenis stream (musik, dering, alarm) atau level volume yang diinginkan.
+   • Perintah dengan Dampak Berbeda: Jika ada lebih dari satu cara logis untuk menyelesaikan permintaan dan dampaknya berbeda secara signifikan, tanyakan opsi mana yang diinginkan pengguna.
+3. GAYA DAN STANDAR PERTANYAAN KLARIFIKASI (JELAS DAN TIDAK BERTELE-TELE):
+   • Pertanyaan WAJIB singkat, padat, jelas, dan langsung ke inti permasalahan (to the point).
+   • JANGAN bertele-tele, JANGAN ada basa-basi pembuka (jangan gunakan: "Halo kak", "Tentu, saya bisa bantu Anda tapi...", "Pertanyaan yang bagus", dll.).
+   • Langsung tanyakan apa hal yang belum jelas.
+   • Berikan contoh pilihan/opsi jawaban singkat yang realistis agar pengguna bisa memilih atau menjawab dengan cepat di ponsel.
+   • Anda dapat mengajukan pertanyaan klarifikasi langsung melalui jawaban teks chat biasa ATAU memanggil tool 'ask_clarification'.
+4. KAPAN BOLEH LANGSUNG MENGEKSEKUSI TOOL (TANPA BERTANYA):
+   • Jika instruksi SUDAH LENGKAP, JELAS, dan SPESIFIK (misal: "buat file di /sdcard/Documents/hello.txt isi 'abcd'", "nyalakan senter HP", "cek status baterai", "jadwalkan pengingat jam 14:00 untuk minum obat").
+   • Jangan bertanya hal-hal sepele yang sudah jelas konteksnya. Bertanyalah HANYA jika ada ambiguitas nyata yang membutuhkan konfirmasi pengguna.
+
 ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
 - Anda memiliki akses penuh ke sistem Android fisik melalui serangkaian tool khusus yang sangat canggih dan presisi.
 - SELALU prioritaskan menggunakan tool khusus di bawah ini daripada mengeksekusi shell command manual:
+  0. 'ask_clarification': MEMINTA KLARIFIKASI PENGGUNA. Panggil tool ini atau jawab langsung dengan teks jika instruksi pengguna ambigu, lokasi penyimpanan berkas belum ditentukan, parameter waktu belum jelas, atau target tindakan belum spesifik. Pertanyaan harus singkat, padat, jelas, dan tidak bertele-tele.
   1. 'time_manager': Jam, tanggal, uptime HP, selisih waktu/countdown, waktu dunia, dan kalender.
+  1b. 'weather_forecast': DETEKSI CUACA & PREDIKSI RAMALAN. Gunakan tool ini untuk memeriksa cuaca saat ini, perkiraan per jam yang akan datang, ramalan harian 3-7 hari ke depan, maupun evaluasi potensi hujan untuk cronjob ('check_rain'). Otomatis menggunakan lokasi GPS perangkat jika aktif, atau fallback ke Lowokwaru, Kota Malang jika lokasi HP nonaktif/mati.
   2. 'file_manager': Membaca (seluruhnya/per baris), menulis, mengedit baris, menyisipkan teks, cari/ganti, grep/pencarian, info berkas, pohon direktori, salin, pindah, dan hapus berkas.
   3. 'system_settings': WiFi (status/scan/toggle), Data Seluler, Bluetooth, Hotspot, Mode Pesawat, GPS/Lokasi, NFC, Volume semua stream, Mode Dering, DND, Kecerahan layar, Rotasi layar, Resolusi, Senter (torch), Getar, Screenshot, Sensor hardware, Suhu thermal, Status baterai, dan Diagnostik IP/Ping.
-  4. 'reminder_manager': PENGINGAT PESAN TELEGRAM & CRONJOB. Gunakan tool ini setiap kali pengguna meminta diingatkan (contoh: 'ingatkan saya jam 12 untuk memberi makan kucing', 'setiap jam 7 pagi ingatkan mandi', 'apa saja pengingat yang ada', 'hapus pengingat mandi'). Tool ini akan mengirim pesan ke chat Telegram pengguna secara terjadwal. JANGAN gunakan 'productivity_control' untuk pengingat pesan Telegram.
+  4. 'reminder_manager': PENGINGAT PESAN TELEGRAM SEDERHANA. Gunakan tool ini untuk pengingat waktu dasar sekali jalan atau jadwal jam harian sederhana (contoh: 'ingatkan saya jam 12 makan siang', 'ingatkan 15 menit lagi').
+  4b. 'cronjob': PENJADWALAN OTONOM KOMPLEKS, EVENT-DRIVEN WATCHER, & SKILL TICK. Gunakan tool ini jika pengguna meminta tugas berkala yang kompleks, pemantauan kondisi bersyarat (contoh: 'ingatkan saya ketika cuaca mau hujan', 'pantau harga barang hingga turun', 'jalankan tick skill setiap 6 jam'), otomasi polling sensor/shell, atau tugas dengan aturan pemicu cerdas (conditional trigger, cooldown, multi-channel notification).
   5. 'productivity_control': Pasang alarm fisik HP (android.intent.SET_ALARM), timer fisik HP, agenda kalender, notifikasi pop-up layar, pesan toast, catatan lokal, kirim/baca SMS, cari kontak, panggilan telepon, info BTS/seluler, dan baca/salin clipboard. HANYA gunakan alarm/timer di sini jika pengguna secara eksplisit meminta memasang alarm di HP.
   6. 'media_control': Kontrol pemutar musik (play/pause/next/prev), YouTube, buka URL peramban, ambil foto kamera depan/belakang ke Telegram, rekam suara mikrofon ke Telegram, Text-to-Speech (berbicara lantang lewat speaker ponsel), dan putar audio lokal.
   7. 'package_manager': Daftar aplikasi (3rd-party/system), buka aplikasi via nama/paket, info versi/APK, cek aplikasi yang sedang aktif di layar (current_app), force stop, enable/disable, clear data, dan uninstall.
@@ -269,6 +291,37 @@ class FafAgent:
                         fn_args = {}
 
                     logger.info(f"Executing tool '{fn_name}' with args {fn_args}")
+
+                    # Intercept ask_clarification: return question immediately to user
+                    if fn_name == "ask_clarification":
+                        tool_result: ToolResult = await self.registry.execute(
+                            name=fn_name,
+                            context=context,
+                            arguments=fn_args,
+                        )
+                        history.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": "Pertanyaan klarifikasi telah diajukan ke pengguna. Menunggu jawaban pengguna.",
+                            }
+                        )
+                        # Satisfy tool_call response requirement for any other tool calls
+                        for other_tc in message.tool_calls:
+                            if other_tc.id != tc.id:
+                                history.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": other_tc.id,
+                                        "content": "Operasi ditunda: Menunggu jawaban klarifikasi dari pengguna.",
+                                    }
+                                )
+
+                        final_text = clean_plain_chat_text(tool_result.output)
+                        if len(history) > self.max_history + 1:
+                            history = [history[0]] + history[-(self.max_history) :]
+                            self._conversations[chat_id] = history
+                        return AgentResponse(text=final_text, media_files=media_files)
 
                     # Execute tool via registry
                     tool_result: ToolResult = await self.registry.execute(

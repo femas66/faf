@@ -61,6 +61,7 @@ def format_help_message() -> str:
         "• /su <perintah> - Eksekusi perintah root langsung tanpa LLM\n"
         "• /cancel - Batalkan tugas AI yang sedang berjalan\n"
         "• /clear - Bersihkan riwayat percakapan sesi AI saat ini\n"
+        "• /doctor atau /check - Periksa status kelengkapan instalasi semua tools di Termux\n"
         "• /help - Tampilkan panduan ini\n\n"
         "Perintah Bahasa Alami (Chat Langsung):\n"
         "• Ingatkan saya jam 12 untuk memberi makan kucing (kirim pesan Telegram)\n"

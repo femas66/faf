@@ -295,3 +295,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("Tugas dibatalkan.")
         if query.message:
             await query.message.reply_text("⎿ Interrupted · What should faf-agent do instead?")
+
+
+@authorized_only
+async def handle_doctor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /doctor or /check: diagnose tool installation status and dependencies."""
+    if not update.effective_message:
+        return
+    status_msg = await update.effective_message.reply_text("● Memeriksa status instalasi tools...")
+    from src.core.diagnostics import check_all_dependencies, format_dependency_report
+    results = check_all_dependencies()
+    report = format_dependency_report(results)
+    if len(report) > 4000:
+        report = report[:3950] + "\n...(dipotong karena batas pesan)"
+    await status_msg.edit_text(report)

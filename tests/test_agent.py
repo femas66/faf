@@ -26,6 +26,7 @@ from src.tools.device_interaction import DeviceInteractionTool
 from src.tools.reminder_mgr import ReminderManagerTool, ReminderStore, ReminderWorker
 from src.tools.web_screenshot import WebScreenshotTool
 from src.tools.media_downloader import MediaDownloaderTool
+from src.tools.clarification import ClarificationTool
 from src.bot.middlewares.auth import authorized_only, is_user_authorized, WhitelistFilter
 
 
@@ -1206,6 +1207,273 @@ async def test_media_downloader_tool_full_flow():
             assert res_batch.success is True
             assert "Ringkasan Pengunduhan Batch" in res_batch.output
             assert "2/2 Berhasil" in res_batch.output
+
+
+# ---------------------------------------------------------------------------
+# 9. Ambiguity Handling & Proactive Clarification Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_clarification_tool_direct():
+    tool = ClarificationTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Question only
+    res_q = await tool.execute(ctx, question="File hello.txt ingin ditaruh di folder mana?")
+    assert res_q.success is True
+    assert "File hello.txt ingin ditaruh di folder mana?" in res_q.output
+    assert "Pilihan:" not in res_q.output
+
+    # 2. Question with options
+    res_opts = await tool.execute(
+        ctx,
+        question="File hello.txt ingin ditaruh di mana?",
+        options=["Folder Termux (~/)", "Penyimpanan internal (/sdcard/Documents/)"],
+    )
+    assert res_opts.success is True
+    assert "Pilihan:" in res_opts.output
+    assert "• Folder Termux (~/)" in res_opts.output
+    assert "• Penyimpanan internal (/sdcard/Documents/)" in res_opts.output
+
+    # 3. Validation: empty question
+    res_empty = await tool.execute(ctx, question="")
+    assert res_empty.success is False
+    assert "tidak boleh kosong" in res_empty.error
+
+
+@pytest.mark.asyncio
+async def test_file_manager_bare_filename_ambiguity_guard():
+    tool = FileManagerTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Write with bare filename (ambiguous) must be rejected
+    res_bare_write = await tool.execute(ctx, action="write", path="hello.txt", content="abcd")
+    assert res_bare_write.success is False
+    assert "Lokasi folder target" in res_bare_write.error
+    assert "ambigu" in res_bare_write.error.lower()
+    assert "Tanyakan klarifikasi" in res_bare_write.error
+
+    # 2. Append with bare filename (ambiguous) must be rejected
+    res_bare_append = await tool.execute(ctx, action="append", path="notes.txt", content="catatan baru")
+    assert res_bare_append.success is False
+    assert "Lokasi folder target" in res_bare_append.error
+    assert "ambigu" in res_bare_append.error.lower()
+
+    # 3. Write with explicit directory path must succeed
+    with tempfile.TemporaryDirectory() as tmpdir:
+        explicit_file = os.path.join(tmpdir, "hello.txt")
+        res_explicit = await tool.execute(ctx, action="write", path=explicit_file, content="abcd")
+        assert res_explicit.success is True
+        assert os.path.exists(explicit_file)
+
+
+@pytest.mark.asyncio
+async def test_agent_ambiguity_handling_direct_text():
+    mock_ai = MagicMock(spec=AIClient)
+
+    # Scenario: User sends ambiguous prompt "buatkan saya file hello.txt dengan isi 'abcd'"
+    # Model detects ambiguity and asks a concise clarification question directly in text (no tool call)
+    msg1 = MagicMock()
+    msg1.content = (
+        "File hello.txt ingin disimpan di direktori mana?\n\n"
+        "Pilihan lokasi:\n"
+        "• Folder kerja Termux (~/)\n"
+        "• Penyimpanan internal (/sdcard/Documents/)"
+    )
+    msg1.tool_calls = None
+    resp1 = MagicMock(choices=[MagicMock(message=msg1)])
+
+    mock_ai.get_chat_completion = AsyncMock(return_value=resp1)
+
+    agent = FafAgent(ai_client=mock_ai)
+    ctx = ToolContext(chat_id=888, user_id=999)
+
+    response = await agent.run("buatkan saya file hello.txt dengan isi 'abcd'", context=ctx)
+    assert response.interrupted is False
+    assert "File hello.txt ingin disimpan di direktori mana?" in response.text
+    assert "Folder kerja Termux" in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_ambiguity_handling_via_ask_clarification_tool():
+    mock_ai = MagicMock(spec=AIClient)
+
+    # Turn 1: Model calls ask_clarification tool
+    tool_call_obj = MagicMock()
+    tool_call_obj.id = "call_clarify_01"
+    tool_call_obj.function.name = "ask_clarification"
+    tool_call_obj.function.arguments = json.dumps({
+        "question": "File hello.txt ingin ditaruh di folder mana?",
+        "options": ["Folder beranda Termux (~/)", "Penyimpanan internal (/sdcard/Documents/)"],
+    })
+
+    msg1 = MagicMock()
+    msg1.content = None
+    msg1.tool_calls = [tool_call_obj]
+    resp1 = MagicMock(choices=[MagicMock(message=msg1)])
+
+    mock_ai.get_chat_completion = AsyncMock(return_value=resp1)
+
+    registry = ToolRegistry()
+    registry.register(ClarificationTool())
+    registry.register(FileManagerTool())
+
+    agent = FafAgent(ai_client=mock_ai, registry=registry)
+    ctx = ToolContext(chat_id=777, user_id=888)
+
+    response = await agent.run("buatkan saya file hello.txt dengan isi 'abcd'", context=ctx)
+    assert response.interrupted is False
+    assert "File hello.txt ingin ditaruh di folder mana?" in response.text
+    assert "Pilihan:" in response.text
+    assert "Folder beranda Termux (~/)" in response.text
+
+    # Verify conversation history has tool response recorded
+    history = agent.get_history(777)
+    assert any(h.get("role") == "tool" and h.get("tool_call_id") == "call_clarify_01" for h in history)
+
+
+@pytest.mark.asyncio
+async def test_agent_ambiguity_multi_turn_resolution():
+    mock_ai = MagicMock(spec=AIClient)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target_file = os.path.join(tmpdir, "hello.txt")
+
+        # Turn 1: Model asks clarification
+        msg1 = MagicMock()
+        msg1.content = "File hello.txt ingin disimpan di folder mana?"
+        msg1.tool_calls = None
+        resp1 = MagicMock(choices=[MagicMock(message=msg1)])
+
+        # Turn 2: After user answers with folder, model executes file_manager write
+        tc_write = MagicMock()
+        tc_write.id = "call_write_01"
+        tc_write.function.name = "file_manager"
+        tc_write.function.arguments = json.dumps({
+            "action": "write",
+            "path": target_file,
+            "content": "abcd",
+        })
+
+        msg2_step1 = MagicMock()
+        msg2_step1.content = None
+        msg2_step1.tool_calls = [tc_write]
+        resp2_step1 = MagicMock(choices=[MagicMock(message=msg2_step1)])
+
+        msg2_step2 = MagicMock()
+        msg2_step2.content = f"File hello.txt berhasil dibuat di {target_file} dengan isi 'abcd'."
+        msg2_step2.tool_calls = None
+        resp2_step2 = MagicMock(choices=[MagicMock(message=msg2_step2)])
+
+        mock_ai.get_chat_completion = AsyncMock(side_effect=[resp1, resp2_step1, resp2_step2])
+
+        registry = ToolRegistry()
+        registry.register(ClarificationTool())
+        registry.register(FileManagerTool())
+
+        agent = FafAgent(ai_client=mock_ai, registry=registry)
+        ctx = ToolContext(chat_id=555, user_id=666)
+
+        # 1st User Turn: Ambiguous request
+        res1 = await agent.run("buatkan saya file hello.txt dengan isi 'abcd'", context=ctx)
+        assert "File hello.txt ingin disimpan di folder mana?" in res1.text
+        assert not os.path.exists(target_file)
+
+        # 2nd User Turn: Clarification response
+        res2 = await agent.run(f"simpan di {tmpdir} ya", context=ctx)
+        assert "berhasil dibuat" in res2.text
+        assert os.path.exists(target_file)
+        with open(target_file, "r") as f:
+            assert f.read() == "abcd"
+
+
+def test_system_prompt_ambiguity_instructions():
+    agent = FafAgent()
+    prompt = agent.build_system_prompt()
+
+    assert "PENANGANAN AMBIGUITAS & KLARIFIKASI PROAKTIF" in prompt
+    assert "DILARANG MENEBAK" in prompt
+    assert "buatkan saya file hello.txt" in prompt
+    assert "ask_clarification" in prompt
+    assert "tidak bertele-tele" in prompt.lower()
+
+
+def test_ambiguity_handler_skill_structure():
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    skill_file = os.path.join(repo_root, "skills", "ambiguity-handler", "SKILL.md")
+    assert os.path.exists(skill_file), "SKILL.md should exist in skills/ambiguity-handler/"
+
+    with open(skill_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "name: ambiguity-handler" in content
+    assert "Kapan Instruksi Dianggap Ambigu" in content
+    assert "Lokasi atau Path Penyimpanan Berkas" in content
+    assert "Standar dan Format Pertanyaan Klarifikasi" in content
+    assert "tidak bertele-tele" in content.lower()
+
+
+# ---------------------------------------------------------------------------
+# 10. Dependency Diagnostics & Installation Checker Tests
+# ---------------------------------------------------------------------------
+
+def test_diagnostics_all_dependencies_and_report_format():
+    from src.core.diagnostics import check_all_dependencies, format_dependency_report, check_single_dependency
+
+    results = check_all_dependencies()
+    assert len(results) >= 10
+
+    # Ensure required fields are present
+    ids = [r.id for r in results]
+    assert "termux_api" in ids
+    assert "tesseract" in ids
+    assert "yt_dlp" in ids
+    assert "aria2c" in ids
+    assert "ffmpeg" in ids
+    assert "chromium" in ids
+
+    # Format report check
+    report = format_dependency_report(results)
+    assert "Status Pemeriksaan Instalasi Tools" in report
+    # Verify exact phrase patterns required by user: "belum di install" and/or "sudah di install"
+    assert "belum di install" in report or "sudah di install" in report
+
+    # Single check
+    single = check_single_dependency("curl")
+    assert single is not None
+    assert single.name == "curl"
+
+
+@pytest.mark.asyncio
+async def test_system_settings_doctor_action():
+    tool = SystemSettingsTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    res = await tool.execute(ctx, action="doctor")
+    assert res.success is True
+    assert "Status Pemeriksaan Instalasi Tools" in res.output
+    assert "Total Diperiksa" in res.output
+
+
+@pytest.mark.asyncio
+async def test_handle_doctor_telegram_command():
+    from src.bot.handlers.commands import handle_doctor
+
+    update = MagicMock()
+    msg = AsyncMock()
+    status_msg = AsyncMock()
+    msg.reply_text = AsyncMock(return_value=status_msg)
+    update.effective_message = msg
+    update.effective_user.id = 111  # allowed from fixture
+    context = MagicMock()
+
+    await handle_doctor(update, context)
+    msg.reply_text.assert_called_once()
+    status_msg.edit_text.assert_called_once()
+    edited_text = status_msg.edit_text.call_args[0][0]
+    assert "Status Pemeriksaan Instalasi Tools" in edited_text
+
+
 
 
 
