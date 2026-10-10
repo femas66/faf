@@ -161,10 +161,13 @@ def main() -> None:
     """Synchronous entry point for running the bot."""
     settings = get_settings()
 
+    log_level = getattr(logging, settings.log_level.upper(), logging.WARNING)
     logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    for noisy in ("httpx", "httpcore", "telegram", "telegram.ext", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     if not settings.allowed_telegram_user_ids:
         logger.warning(

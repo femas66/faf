@@ -37,7 +37,7 @@ class Settings:
     security_confirmation_timeout: int = 60
     enable_root_commands: bool = True
     command_timeout: int = 30
-    log_level: str = "INFO"
+    log_level: str = "WARNING"
     notes_storage_dir: str = "/sdcard/Notes"
     temp_media_dir: str = "/data/data/com.termux/files/home/faf_media"
     memory_db_path: str = "/data/data/com.termux/files/home/faf_memory.db"
@@ -78,7 +78,7 @@ class Settings:
             self.enable_root_commands = bool(enable_root)
 
         self.command_timeout = int(get_val("command_timeout", 30))
-        self.log_level = str(get_val("log_level", "INFO") or "INFO")
+        self.log_level = str(get_val("log_level", "WARNING") or "WARNING")
         self.notes_storage_dir = str(
             get_val("notes_storage_dir", "/sdcard/Notes") or "/sdcard/Notes"
         )

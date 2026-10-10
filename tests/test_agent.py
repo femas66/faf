@@ -1786,6 +1786,13 @@ def test_system_prompt_natural_tone_and_greeting_brevity():
     assert "tanpa diminta" in prompt.lower()
 
 
+def test_default_log_level_is_warning():
+    from src.config import Settings
+    s = Settings()
+    assert s.log_level == "WARNING"
+
+
+
 
 
 
