@@ -1731,6 +1731,52 @@ def test_application_post_shutdown_registered(monkeypatch):
     assert application.post_shutdown is not None
 
 
+@pytest.mark.asyncio
+async def test_handle_chat_message_two_bubbles_and_no_cancel_button(monkeypatch):
+    from src.bot.handlers.chat import handle_chat_message
+    from telegram.constants import ChatAction
+    from src.core.agent import AgentResponse
+
+    update = MagicMock()
+    msg = AsyncMock()
+    msg.text = "halo bot"
+    msg.message_id = 42
+    update.effective_message = msg
+    update.effective_chat.id = 1234
+    update.effective_user.id = 111
+    context = MagicMock()
+    context.bot.send_chat_action = AsyncMock()
+
+    async def mock_agent_run(user_message, context, **kwargs):
+        if context.on_status_update:
+            await context.on_status_update("menjalankan kalkulasi")
+        return AgentResponse(text="Halo, ini jawaban saya.")
+
+    from src.core.agent import agent
+    monkeypatch.setattr(agent, "run", mock_agent_run)
+
+    await handle_chat_message(update, context)
+
+    # 1. Verify typing action was sent
+    context.bot.send_chat_action.assert_called()
+    assert any(
+        call.kwargs.get("action") == ChatAction.TYPING or (call.args and ChatAction.TYPING in call.args)
+        for call in context.bot.send_chat_action.call_args_list
+    )
+
+    # 2. Verify reply_text was called ONLY ONCE with the final response (2 bubbles in chat total: user + bot)
+    assert msg.reply_text.call_count == 1
+    call_args = msg.reply_text.call_args
+    final_text = call_args[0][0]
+    assert "Halo, ini jawaban saya." in final_text
+
+    # 3. Verify no cancel keyboard or intermediate status text
+    assert "sedang menganalisis" not in final_text
+    reply_markup = call_args[1].get("reply_markup") if len(call_args) > 1 and "reply_markup" in call_args[1] else None
+    assert reply_markup is None
+
+
+
 
 
 

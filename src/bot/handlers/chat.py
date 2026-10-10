@@ -8,7 +8,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from src.bot.middlewares.auth import authorized_only
-from src.bot.ui.keyboards import get_cancel_keyboard, get_confirmation_keyboard
+from src.bot.ui.keyboards import get_confirmation_keyboard
 from src.core.agent import agent, AgentResponse, clean_plain_chat_text
 from src.core.permissions import permission_manager
 from src.tools.base import ToolContext
@@ -33,24 +33,27 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    # Send typing action
-    try:
-        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-    except Exception:
-        pass
+    # Continuous typing action indicator while agent is thinking
+    typing_stop = asyncio.Event()
 
-    status_msg = await update.effective_message.reply_text(
-        "● faf-agent sedang menganalisis...",
-        reply_markup=get_cancel_keyboard(),
-    )
+    async def _keep_typing() -> None:
+        while not typing_stop.is_set():
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(typing_stop.wait(), timeout=4.0)
+            except asyncio.TimeoutError:
+                pass
 
+    typing_task = asyncio.create_task(_keep_typing())
     cancel_event = asyncio.Event()
 
-    # Callback for real-time status updates in Telegram
+    # Callback for real-time status updates in Telegram: keep typing indicator active
     async def update_status(text: str) -> None:
         try:
-            clean_status = clean_plain_chat_text(text)
-            await status_msg.edit_text(clean_status, reply_markup=get_cancel_keyboard())
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         except Exception:
             pass
 
@@ -78,7 +81,7 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     tool_context = ToolContext(
         chat_id=chat_id,
         user_id=user_id,
-        message_id=status_msg.message_id,
+        message_id=update.effective_message.message_id,
         cancel_event=cancel_event,
         on_status_update=update_status,
         on_request_confirmation=request_confirmation,
@@ -96,6 +99,8 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             interrupted=True,
         )
     finally:
+        typing_stop.set()
+        typing_task.cancel()
         if agent._active_tasks.get(chat_id) is task:
             agent._active_tasks.pop(chat_id, None)
 
@@ -123,14 +128,10 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except Exception as e:
                     logger.error(f"Failed to send media file {file_path}: {e}")
 
-    # 2. Update status message or send final plain text (no markdown, no tables)
+    # 2. Send final plain text response directly (exactly 2 chat bubbles total: user prompt + bot reply)
     final_text = clean_plain_chat_text(response.text) or "(Selesai tanpa tanggapan teks)"
 
     if len(final_text) > 4000:
         final_text = final_text[:4000] + "\n\n...(respons dipotong karena batas panjang pesan)"
 
-    try:
-        await status_msg.edit_text(final_text, reply_markup=None)
-    except Exception:
-        if update.effective_message:
-            await update.effective_message.reply_text(final_text)
+    await update.effective_message.reply_text(final_text)
