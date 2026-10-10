@@ -1776,6 +1776,17 @@ async def test_handle_chat_message_two_bubbles_and_no_cancel_button(monkeypatch)
     assert reply_markup is None
 
 
+def test_system_prompt_natural_tone_and_greeting_brevity():
+    from src.core.agent import FafAgent
+    agent = FafAgent()
+    prompt = agent.build_system_prompt()
+
+    assert "GAYA BICARA NATURAL SEPERTI MANUSIA" in prompt
+    assert "tidak kaku" in prompt.lower()
+    assert "tanpa diminta" in prompt.lower()
+
+
+
 
 
 
