@@ -79,13 +79,21 @@ class PermissionManager:
         r"\breboot\b",                                          # system reboot
         r"\bshutdown\b",                                        # system shutdown
         r"\bpoweroff\b",                                        # system poweroff
+        r"\bhalt\b",                                            # system halt
+        r"\binit\s+[0-6]\b",                                    # init runlevels (0=shutdown, 6=reboot)
+        r"\btelinit\s+[0-6]\b",                                 # telinit runlevels
+        r"sysrq-trigger",                                       # kernel sysrq crash/shutdown
+        r"sys\.powerctl",                                       # Android property power control
+        r"\bsvc\s+power\s+(shutdown|reboot)\b",                 # Android service power control
+        r"\bcmd\s+power\s+(shutdown|reboot)\b",                 # Android cmd power control
+        r"\bbattery\s+set\s+level\s+0\b",                       # Fake 0% battery shutdown
         r"\bpm\s+uninstall\b",                                  # package uninstall
         r"\bpm\s+clear\b",                                      # clear app data
         r"\bwipe\b",                                            # wipe partition
         r"\bfdisk\b",                                           # partition edit
     ]
 
-    # Protected processes for anti self-termination
+    # Protected processes for anti self-termination & system stability
     PROTECTED_PROCESS_NAMES = {
         "faf-agent",
         "python",
@@ -97,6 +105,15 @@ class PermissionManager:
         "zygote",
         "zygote64",
         "init",
+        "system_server",
+        "surfaceflinger",
+        "lmkd",
+        "servicemanager",
+        "hwservicemanager",
+        "vold",
+        "netd",
+        "logd",
+        "ueventd",
     }
 
     # Sensitive credential files patterns

@@ -78,6 +78,12 @@ def test_destructive_command_detection():
     assert pm.check_destructive("mkfs.ext4 /dev/block/sda")[0] is True
     assert pm.check_destructive("reboot")[0] is True
     assert pm.check_destructive("shutdown -h now")[0] is True
+    assert pm.check_destructive("halt")[0] is True
+    assert pm.check_destructive("init 0")[0] is True
+    assert pm.check_destructive("svc power shutdown")[0] is True
+    assert pm.check_destructive("setprop sys.powerctl shutdown")[0] is True
+    assert pm.check_destructive("echo c > /proc/sysrq-trigger")[0] is True
+    assert pm.check_destructive("dumpsys battery set level 0")[0] is True
     assert pm.check_destructive("pm uninstall com.whatsapp")[0] is True
     assert pm.check_destructive("pm clear com.android.providers.telephony")[0] is True
 
@@ -105,6 +111,9 @@ def test_anti_self_termination_immunity():
     assert pm.check_self_termination("killall termux")[0] is True
     assert pm.check_self_termination("pkill sshd")[0] is True
     assert pm.check_self_termination("pkill tmux")[0] is True
+    assert pm.check_self_termination("pkill system_server")[0] is True
+    assert pm.check_self_termination("killall lmkd")[0] is True
+    assert pm.check_self_termination("pkill surfaceflinger")[0] is True
 
 
 def test_credential_exfiltration_defense():
