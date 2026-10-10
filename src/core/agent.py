@@ -84,8 +84,11 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
 PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
 - Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
 - Jika pengguna menceritakan peristiwa penting atau menyelesaikan proyek/tugas signifikan, gunakan 'store_episode' untuk mengabadikan peristiwa tersebut ke memori episodik.
-- Jika terdapat relasi penting antarentitas (misal: orang X punya nomor HP Y, atau device A terhubung dengan aksesoris B), gunakan 'add_relation' untuk memperkaya graf pengetahuan.
-- Jangan pernah melupakan preferensi pengguna. Manfaatkan fakta dan relasi yang tercantum di bagian memori secara alami dalam setiap respons tanpa perlu bertanya ulang."""
+- Jangan pernah melupakan preferensi pengguna. Manfaatkan fakta dan relasi yang tercantum di bagian memori secara alami dalam setiap respons tanpa perlu bertanya ulang.
+
+PRINSIP KEJUJURAN & TRANSPARANSI TINDAKAN (JIKA TIDAK BISA, KATAKAN TIDAK BISA):
+- Jika setelah mencoba cara yang relevan suatu perintah terbukti mustahil, tidak didukung, sumber daya tidak ditemukan, atau selalu gagal: JANGAN mengulangi pemanggilan tool terus-menerus tanpa arah.
+- SEGERA hentikan pemanggilan tool dan jelaskan langsung kepada pengguna dengan jujur bahwa Anda tidak bisa menyelesaikannya beserta alasan kendalanya. Mengakui kendala secara manusiawi jauh lebih baik daripada mengulangi tindakan yang gagal tanpa hasil."""
 
 INJECTION_PATTERNS = [
     r"abaikan\s+(semua\s+)?instruksi\s+(sebelumnya|awal)",
@@ -252,10 +255,12 @@ class FafAgent:
         self,
         user_message: str,
         context: ToolContext,
-        max_steps: int = 8,
+        max_steps: int | None = None,
     ) -> AgentResponse:
         """Execute the agent loop with function calling and cancellation support."""
         chat_id = context.chat_id
+        if max_steps is None:
+            max_steps = get_settings().agent_max_steps
 
         # Fast prompt injection intercept
         if self.check_prompt_injection(user_message):
@@ -269,6 +274,8 @@ class FafAgent:
         tools_schema = self.registry.get_openai_tools()
         media_files: list[dict[str, str]] = []
         step = 0
+        consecutive_identical_errors = 0
+        last_tool_sig: tuple[str, str, str] | None = None
 
         try:
             while step < max_steps:
@@ -389,9 +396,49 @@ class FafAgent:
                         }
                     )
 
-            # Max steps exceeded
+                    # Deteksi kegagalan berulang pada tool dan argumen yang sama
+                    if not tool_result.success:
+                        tool_sig = (fn_name, fn_args_raw, str(tool_result.error or ""))
+                        if tool_sig == last_tool_sig:
+                            consecutive_identical_errors += 1
+                        else:
+                            consecutive_identical_errors = 1
+                            last_tool_sig = tool_sig
+                    else:
+                        consecutive_identical_errors = 0
+                        last_tool_sig = None
+
+                # Jika tool yang sama gagal 3x berturut-turut, hentikan loop lebih awal
+                if consecutive_identical_errors >= 3:
+                    logger.warning("Repeated tool failure loop detected (3x identical errors). Stopping loop for human explanation.")
+                    break
+
+            # Jika loop selesai tanpa teks akhir (mencapai batas langkah atau kendala berulang),
+            # minta LLM memberikan penjelasan langsung dan jujur kepada pengguna layaknya asisten manusia
+            try:
+                synthesis_prompt = (
+                    "Tindakan tidak dapat dilanjutkan lebih jauh karena menemui kendala teknis berulang. "
+                    "Jangan memanggil tool lagi. Berikan respon akhir secara langsung, santun, dan jujur kepada pengguna layaknya asisten manusia: "
+                    "jelaskan secara ringkas apa yang telah dicoba, apa kendala/penyebabnya sehingga hal ini belum/tidak bisa diselesaikan, "
+                    "dan katakan terus terang bahwa Anda tidak bisa menyelesaikannya saat ini."
+                )
+                history.append({"role": "user", "content": synthesis_prompt})
+                final_resp = await self.ai_client.get_chat_completion(
+                    messages=history,
+                    tools=None,
+                )
+                final_content = final_resp.choices[0].message.content or ""
+                final_text = clean_plain_chat_text(final_content)
+                if final_text:
+                    if len(history) > self.max_history + 1:
+                        history = self._trim_history(history)
+                        self._conversations[chat_id] = history
+                    return AgentResponse(text=final_text, media_files=media_files)
+            except Exception as e:
+                logger.warning(f"Failed to generate final human synthesis: {e}")
+
             return AgentResponse(
-                text="Langkah eksekusi mencapai batas maksimum. Berikut status tindakan yang telah diambil.",
+                text="Maaf, saya belum dapat menyelesaikan permintaan ini karena menemui kendala teknis berulang. Silakan periksa kembali detail perintah atau coba beberapa saat lagi.",
                 media_files=media_files,
             )
 

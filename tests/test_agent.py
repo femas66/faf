@@ -387,6 +387,84 @@ async def test_agent_cancellation():
     assert "Interrupted" in response.text
 
 
+@pytest.mark.asyncio
+async def test_agent_max_steps_human_synthesis():
+    mock_ai = MagicMock(spec=AIClient)
+
+    # 1st call: returns tool call to system_settings
+    tool_call_obj = MagicMock()
+    tool_call_obj.id = "call_step1"
+    tool_call_obj.function.name = "system_settings"
+    tool_call_obj.function.arguments = '{"action": "torch", "state": "on"}'
+
+    first_msg = MagicMock(content=None, tool_calls=[tool_call_obj])
+    first_resp = MagicMock(choices=[MagicMock(message=first_msg)])
+
+    # Synthesis call (triggered when max_steps=1 is reached)
+    synthesis_msg = MagicMock(
+        content="Maaf, saya tidak dapat menyelesaikan tindakan karena senter perangkat tidak merespon.",
+        tool_calls=None,
+    )
+    synthesis_resp = MagicMock(choices=[MagicMock(message=synthesis_msg)])
+
+    mock_ai.get_chat_completion = AsyncMock(side_effect=[first_resp, synthesis_resp])
+
+    registry = ToolRegistry()
+    registry.register(SystemSettingsTool())
+
+    agent = FafAgent(ai_client=mock_ai, registry=registry)
+    ctx = ToolContext(chat_id=555, user_id=666)
+
+    with patch("src.tools.system.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="", stderr="Hardware error", returncode=1, command="termux-torch on", executed_as_root=False
+        )
+        response = await agent.run("Nyalakan senter", context=ctx, max_steps=1)
+
+    assert "batas maksimum" not in response.text
+    assert "tidak dapat menyelesaikan" in response.text or "Maaf" in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_repeated_error_early_break_and_synthesis():
+    mock_ai = MagicMock(spec=AIClient)
+
+    # Generates identical tool call each time
+    tool_call_obj = MagicMock()
+    tool_call_obj.id = "call_repeat"
+    tool_call_obj.function.name = "system_settings"
+    tool_call_obj.function.arguments = '{"action": "torch", "state": "on"}'
+
+    loop_msg = MagicMock(content=None, tool_calls=[tool_call_obj])
+    loop_resp = MagicMock(choices=[MagicMock(message=loop_msg)])
+
+    synthesis_msg = MagicMock(
+        content="Maaf, saya tidak bisa menyalakan senter karena izin sistem ditolak berulang kali.",
+        tool_calls=None,
+    )
+    synthesis_resp = MagicMock(choices=[MagicMock(message=synthesis_msg)])
+
+    # Even with max_steps=10, 3 identical errors trigger synthesis on call #4
+    mock_ai.get_chat_completion = AsyncMock(
+        side_effect=[loop_resp, loop_resp, loop_resp, synthesis_resp]
+    )
+
+    registry = ToolRegistry()
+    registry.register(SystemSettingsTool())
+
+    agent = FafAgent(ai_client=mock_ai, registry=registry)
+    ctx = ToolContext(chat_id=556, user_id=667)
+
+    with patch("src.tools.system.bridge.execute_shell") as mock_exec:
+        mock_exec.return_value = CommandResult(
+            stdout="", stderr="Permission denied", returncode=1, command="termux-torch on", executed_as_root=False
+        )
+        response = await agent.run("Nyalakan senter", context=ctx, max_steps=10)
+
+    assert "batas maksimum" not in response.text
+    assert "tidak bisa" in response.text or "Maaf" in response.text
+
+
 # ---------------------------------------------------------------------------
 # 7. Auth Middleware Tests
 # ---------------------------------------------------------------------------
