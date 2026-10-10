@@ -469,3 +469,42 @@ async def test_memory_manager_tool_all_actions(temp_memory_store, monkeypatch):
     assert res_reflect.success
     assert "Laporan Refleksi & Konsolidasi" in res_reflect.output
 
+
+def test_memory_store_connection_cleanup(tmp_path, monkeypatch):
+    import sqlite3
+    db_file = str(tmp_path / "test_conn_leak.db")
+    store = MemoryStore(db_path=db_file)
+
+    closed_connections = []
+    original_connect = sqlite3.connect
+
+    class ConnectionWrapper:
+        def __init__(self, real_conn):
+            self.__dict__["_conn"] = real_conn
+        def close(self):
+            closed_connections.append(True)
+            return self._conn.close()
+        def __enter__(self):
+            return self._conn.__enter__()
+        def __exit__(self, *args):
+            return self._conn.__exit__(*args)
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+        def __setattr__(self, name, value):
+            setattr(self._conn, name, value)
+
+    def spy_connect(*args, **kwargs):
+        conn = original_connect(*args, **kwargs)
+        return ConnectionWrapper(conn)
+
+    monkeypatch.setattr(sqlite3, "connect", spy_connect)
+
+    store.store_fact(key="test_key", content="test_content")
+    fact = store.get_fact("test_key")
+    assert fact is not None
+    assert fact["content"] == "test_content"
+
+    # Verify that connections opened during store_fact and get_fact are closed
+    assert len(closed_connections) >= 2, f"Expected closed connections >= 2, got {len(closed_connections)}"
+
+

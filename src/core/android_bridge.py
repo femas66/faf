@@ -6,6 +6,7 @@ import logging
 import os
 import platform
 import re
+import shlex
 import shutil
 import signal
 from dataclasses import dataclass
@@ -86,8 +87,8 @@ class AndroidBridge:
             f"export PATH={termux_bin}:/system/bin:/system/xbin:$PATH; "
             f"export LD_LIBRARY_PATH={termux_lib}:$LD_LIBRARY_PATH; "
         )
-        safe_payload = raw_cmd.replace('"', '\\"')
-        return f'su -c "{env_setup} {safe_payload}"'
+        full_payload = f"{env_setup} {raw_cmd}"
+        return f"su -c {shlex.quote(full_payload)}"
 
     async def execute_shell(
         self,

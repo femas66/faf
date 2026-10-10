@@ -50,3 +50,13 @@ faf_media/
 .vscode/
 *.swp
 *.swo
+
+# Runtime persistent databases and data
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.lock
+audit_report.md
+docs/
+

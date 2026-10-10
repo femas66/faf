@@ -389,9 +389,11 @@ class ProductivityControlTool(BaseTool):
             if not number:
                 return ToolResult(success=False, output="", error="Parameter 'phone_number' wajib diisi untuk make_call.")
 
-            res = await bridge.execute_shell(f"termux-telephony-call {shlex.quote(number)}")
+            clean_number = re.sub(r"[^\d+*#,]", "", number)
+            dial_target = clean_number or number
+            res = await bridge.execute_shell(f"termux-telephony-call {shlex.quote(dial_target)}")
             if not res.success and bridge.is_root_available():
-                res = await bridge.execute_shell(f"am start -a android.intent.action.CALL -d tel:{shlex.quote(number)}", as_root=True)
+                res = await bridge.execute_shell(f"am start -a android.intent.action.CALL -d {shlex.quote(f'tel:{dial_target}')}", as_root=True)
 
             return ToolResult(
                 success=True,

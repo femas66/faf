@@ -112,10 +112,16 @@ def create_application() -> Application:
         _default_cron_worker.start()
         logger.info("Reminder and CronJob background workers activated in application.")
 
+    async def on_shutdown(application: Application) -> None:
+        _default_worker.stop()
+        _default_cron_worker.stop()
+        logger.info("Reminder and CronJob background workers stopped.")
+
     app = (
         ApplicationBuilder()
         .token(settings.telegram_bot_token)
         .post_init(on_startup)
+        .post_shutdown(on_shutdown)
         .concurrent_updates(True)
         .build()
     )

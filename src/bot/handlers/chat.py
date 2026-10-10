@@ -26,6 +26,13 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id if update.effective_user else 0
     prompt = update.effective_message.text or ""
 
+    existing_task = agent._active_tasks.get(chat_id)
+    if existing_task and not existing_task.done():
+        await update.effective_message.reply_text(
+            "⏳ Perintah sebelumnya masih diproses. Ketik /cancel jika ingin membatalkannya terlebih dahulu.",
+        )
+        return
+
     # Send typing action
     try:
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
@@ -89,7 +96,8 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             interrupted=True,
         )
     finally:
-        agent._active_tasks.pop(chat_id, None)
+        if agent._active_tasks.get(chat_id) is task:
+            agent._active_tasks.pop(chat_id, None)
 
     # 1. Send media files if generated (e.g. photos, screenshots)
     if response.media_files:

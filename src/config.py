@@ -40,6 +40,7 @@ class Settings:
     log_level: str = "INFO"
     notes_storage_dir: str = "/sdcard/Notes"
     temp_media_dir: str = "/data/data/com.termux/files/home/faf_media"
+    memory_db_path: str = "/data/data/com.termux/files/home/faf_memory.db"
 
     def __init__(self, **kwargs: Any) -> None:
         # Load from .env file if present

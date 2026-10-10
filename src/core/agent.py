@@ -189,6 +189,43 @@ class FafAgent:
         ]
         logger.info(f"Conversation history reset for chat_id={chat_id}")
 
+    def _trim_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Trim conversation history preserving system prompt and valid message sequences.
+
+        Prevents leaving orphaned 'tool' role messages or 'assistant' tool calls
+        without matching tool outputs, which cause API errors.
+        """
+        if len(history) <= self.max_history + 1:
+            return history
+
+        system_msg = history[0]
+        tail = history[-(self.max_history) :]
+
+        first_user_idx = None
+        for idx, msg in enumerate(tail):
+            if msg.get("role") == "user":
+                first_user_idx = idx
+                break
+
+        if first_user_idx is not None:
+            trimmed_tail = tail[first_user_idx:]
+        else:
+            last_user_idx = None
+            for idx in range(len(history) - 1, 0, -1):
+                if history[idx].get("role") == "user":
+                    last_user_idx = idx
+                    break
+
+            if last_user_idx is not None and last_user_idx < len(history) - 1:
+                trimmed_tail = [history[last_user_idx], history[-1]]
+            else:
+                idx = 0
+                while idx < len(tail) and (tail[idx].get("role") == "tool" or tail[idx].get("tool_calls")):
+                    idx += 1
+                trimmed_tail = tail[idx:]
+
+        return [system_msg] + trimmed_tail
+
     def check_prompt_injection(self, text: str) -> bool:
         """Check for blatant prompt injection or prompt leak attempts in user input."""
         for pattern in INJECTION_PATTERNS:
@@ -272,7 +309,7 @@ class FafAgent:
 
                     # Trim history to max size
                     if len(history) > self.max_history + 1:
-                        history = [history[0]] + history[-(self.max_history) :]
+                        history = self._trim_history(history)
                         self._conversations[chat_id] = history
 
                     return AgentResponse(text=final_text, media_files=media_files)
@@ -319,7 +356,7 @@ class FafAgent:
 
                         final_text = clean_plain_chat_text(tool_result.output)
                         if len(history) > self.max_history + 1:
-                            history = [history[0]] + history[-(self.max_history) :]
+                            history = self._trim_history(history)
                             self._conversations[chat_id] = history
                         return AgentResponse(text=final_text, media_files=media_files)
 

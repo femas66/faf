@@ -1474,6 +1474,266 @@ async def test_handle_doctor_telegram_command():
     assert "Status Pemeriksaan Instalasi Tools" in edited_text
 
 
+@pytest.mark.asyncio
+async def test_ai_client_endpoint_url_resolution(monkeypatch):
+    from src.core.ai_client import AIClient
+    import httpx
+
+    captured_urls = []
+
+    async def mock_post(self, url, **kwargs):
+        captured_urls.append(str(url))
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+        }
+        return mock_response
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    client = AIClient()
+
+    # Case 1: base_url without /v1
+    client.settings.openai_base_url = "https://api.openai.com"
+    await client.get_chat_completion([{"role": "user", "content": "hi"}])
+    assert captured_urls[-1] == "https://api.openai.com/v1/chat/completions"
+
+    # Case 2: base_url with /v1
+    client.settings.openai_base_url = "https://api.openai.com/v1"
+    await client.get_chat_completion([{"role": "user", "content": "hi"}])
+    assert captured_urls[-1] == "https://api.openai.com/v1/chat/completions"
+
+
+def test_agent_history_truncation_preserves_valid_tool_sequence():
+    from src.core.agent import FafAgent
+    agent = FafAgent()
+    agent.max_history = 4
+
+    history = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "f1", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tc1", "content": "res1"},
+        {"role": "assistant", "content": "done1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "tool_calls": [{"id": "tc2", "function": {"name": "f2", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tc2", "content": "res2"},
+        {"role": "assistant", "content": "done2"},
+    ]
+    trimmed = agent._trim_history(history)
+    assert len(trimmed) <= agent.max_history + 1
+    assert trimmed[0]["role"] == "system"
+    assert trimmed[1]["role"] != "tool"
+    tool_call_ids = set()
+    for msg in trimmed[1:]:
+        if msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                tool_call_ids.add(tc["id"])
+        elif msg.get("role") == "tool":
+            assert msg.get("tool_call_id") in tool_call_ids
+
+
+@pytest.mark.asyncio
+async def test_chat_concurrency_guard():
+    from src.bot.handlers.chat import handle_chat_message
+    import asyncio
+
+    update = MagicMock()
+    msg = AsyncMock()
+    msg.text = "halo bot"
+    update.effective_message = msg
+    update.effective_chat.id = 9999
+    update.effective_user.id = 111
+    context = MagicMock()
+
+    running_event = asyncio.Event()
+    async def slow_task():
+        await running_event.wait()
+
+    dummy_task = asyncio.create_task(slow_task())
+    from src.core.agent import agent
+    agent._active_tasks[9999] = dummy_task
+
+    try:
+        await handle_chat_message(update, context)
+        assert agent._active_tasks[9999] is dummy_task
+        msg.reply_text.assert_called_once()
+        reply_call = msg.reply_text.call_args[0][0]
+        assert "masih diproses" in reply_call or "/cancel" in reply_call
+    finally:
+        running_event.set()
+        await dummy_task
+        agent._active_tasks.pop(9999, None)
+
+
+@pytest.mark.asyncio
+async def test_media_open_url_shell_quoting(monkeypatch):
+    from src.tools.media import MediaControlTool
+    from src.core.android_bridge import CommandResult
+    import shlex
+
+    tool = MediaControlTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+
+    executed_cmds = []
+
+    async def mock_execute_shell(cmd, **kwargs):
+        executed_cmds.append(cmd)
+        if "termux-open-url" in cmd:
+            return CommandResult(stdout="", stderr="not found", returncode=127, command=cmd, executed_as_root=False)
+        return CommandResult(stdout="OK", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+    from src.tools import media
+    monkeypatch.setattr(media.bridge, "execute_shell", mock_execute_shell)
+
+    dangerous_url = "https://example.com/test?foo=1&bar=2\"; echo PWNED; \""
+    await tool.execute(ctx, action="open_url", url=dangerous_url)
+
+    assert len(executed_cmds) == 2
+    am_cmd = executed_cmds[1]
+    assert "am start -a android.intent.action.VIEW -d " in am_cmd
+    assert shlex.quote(dangerous_url) in am_cmd
+
+
+def test_android_bridge_build_root_command_quoting():
+    from src.core.android_bridge import AndroidBridge
+    import shlex
+    b = AndroidBridge()
+    raw = 'echo "hello $(whoami)"'
+    wrapped = b._build_root_command(raw)
+    assert wrapped.startswith("su -c ")
+    # Must use shlex.quote around the payload so $(...) is not evaluated prematurely by the outer shell
+    assert 'su -c "' not in wrapped
+
+
+@pytest.mark.asyncio
+async def test_media_downloader_tls_verification_default(monkeypatch, tmp_path):
+    from src.tools.media_downloader import MediaDownloaderTool
+    from src.core.android_bridge import CommandResult
+
+    tool = MediaDownloaderTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+
+    executed_cmds = []
+
+    async def mock_execute_shell(cmd, **kwargs):
+        executed_cmds.append(cmd)
+        return CommandResult(stdout="Success", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+    from src.tools import media_downloader
+    monkeypatch.setattr(media_downloader.bridge, "execute_shell", mock_execute_shell)
+    monkeypatch.setattr(
+        media_downloader,
+        "_get_installed_engines",
+        lambda: {"aria2c": "/usr/bin/aria2c", "curl": "/usr/bin/curl", "wget": "/usr/bin/wget"},
+    )
+
+    out_file = tmp_path / "test.mp4"
+    out_file.write_bytes(b"dummy")
+
+    await tool.execute(
+        ctx,
+        action="direct",
+        url="https://example.com/video.mp4",
+        output_dir=str(tmp_path),
+        accelerated=True,
+    )
+
+    aria_cmd = executed_cmds[0]
+    assert "--check-certificate=false" not in aria_cmd
+
+
+@pytest.mark.asyncio
+async def test_productivity_make_call_dialer_uri_no_raw_quotes(monkeypatch):
+    from src.tools.productivity import ProductivityControlTool
+    from src.core.android_bridge import CommandResult
+    import shlex
+
+    tool = ProductivityControlTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+
+    executed_cmds = []
+
+    async def mock_execute_shell(cmd, **kwargs):
+        executed_cmds.append(cmd)
+        if "termux-telephony-call" in cmd:
+            return CommandResult(stdout="", stderr="failed", returncode=1, command=cmd, executed_as_root=False)
+        return CommandResult(stdout="OK", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+    from src.tools import productivity
+    monkeypatch.setattr(productivity.bridge, "execute_shell", mock_execute_shell)
+    monkeypatch.setattr(productivity.bridge, "is_root_available", lambda: True)
+
+    phone = "+62 812 3456 789"
+    await tool.execute(ctx, action="make_call", phone_number=phone)
+
+    assert len(executed_cmds) == 2
+    am_cmd = executed_cmds[1]
+    assert "tel:'" not in am_cmd
+    assert "-d tel:+628123456789" in am_cmd or f"-d {shlex.quote('tel:+628123456789')}" in am_cmd
+
+
+@pytest.mark.asyncio
+async def test_media_downloader_action_info_views_string_formatting(monkeypatch):
+    from src.tools.media_downloader import MediaDownloaderTool
+    from src.core.android_bridge import CommandResult
+    import json
+
+    tool = MediaDownloaderTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+
+    mock_json = json.dumps({
+        "title": "Test Video",
+        "uploader": "Test Channel",
+        "duration": 120,
+        "view_count": 1500000,
+        "formats": [{"height": 1080}],
+    })
+
+    async def mock_execute_shell(cmd, **kwargs):
+        if "--dump-single-json" in cmd:
+            return CommandResult(stdout=mock_json, stderr="", returncode=0, command=cmd, executed_as_root=False)
+        return CommandResult(stdout="OK", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+    from src.tools import media_downloader
+    monkeypatch.setattr(media_downloader.bridge, "execute_shell", mock_execute_shell)
+    monkeypatch.setattr(media_downloader, "_get_installed_engines", lambda: {"yt-dlp": "/usr/bin/yt-dlp"})
+
+    target_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    res = await tool.execute(ctx, action="info", url=target_url)
+
+    assert res.success is True
+    assert "1,500,000" in res.output
+    # Must preserve the source URL line and not drop it due to ternary precedence
+    assert f"Sumber URL: {target_url}" in res.output
+
+
+def test_config_settings_dataclass_fields():
+    import dataclasses
+    from src.config import Settings
+
+    field_names = {f.name for f in dataclasses.fields(Settings)}
+    assert "memory_db_path" in field_names
+
+
+def test_application_post_shutdown_registered(monkeypatch):
+    from src.bot import app
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF")
+    monkeypatch.setenv("ALLOWED_TELEGRAM_USER_IDS", "111")
+    settings = app.get_settings()
+    settings.telegram_bot_token = "123456:ABC-DEF"
+
+    application = app.create_application()
+    # Check post_shutdown is registered
+    assert application.post_shutdown is not None
+
+
+
+
+
 
 
 

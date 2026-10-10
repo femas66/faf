@@ -145,7 +145,7 @@ class MediaControlTool(BaseTool):
 
             res = await bridge.execute_shell(f"termux-open-url {shlex.quote(url)}")
             if not res.success:
-                res = await bridge.execute_shell(f'am start -a android.intent.action.VIEW -d "{url}"')
+                res = await bridge.execute_shell(f"am start -a android.intent.action.VIEW -d {shlex.quote(url)}")
             return ToolResult(
                 success=True,
                 output=f"Tautan URL berhasil dibuka di peramban ponsel: {url}",

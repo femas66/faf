@@ -58,7 +58,7 @@ class AIClient:
         """Call LLM completion endpoint with OpenAI tool calling protocol."""
         base_url = self.settings.openai_base_url.rstrip("/")
         if not base_url.endswith("/v1"):
-            url = f"{base_url}/chat/completions"
+            url = f"{base_url}/v1/chat/completions"
         else:
             url = f"{base_url}/chat/completions"
 

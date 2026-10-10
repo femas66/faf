@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import logging
@@ -7,7 +8,7 @@ import os
 import re
 import sqlite3
 import threading
-from typing import Any
+from typing import Any, Generator
 
 from src.config import get_settings
 
@@ -87,11 +88,16 @@ class MemoryStore:
 
         return self._actual_path
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         path = self._resolve_db_path()
         conn = sqlite3.connect(path, timeout=15.0)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._lock:

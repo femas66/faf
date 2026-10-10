@@ -362,13 +362,14 @@ class MediaDownloaderTool(BaseTool):
                     formats = data.get("formats", [])
                     max_height = max([f.get("height") or 0 for f in formats], default=0)
 
+                    views_str = f"{views:,}" if isinstance(views, int) else str(views)
                     out = (
                         f"Informasi Media Stream (yt-dlp):\n\n"
                         f"• Judul: {title}\n"
                         f"• Saluran / Uploader: {uploader}\n"
                         f"• Durasi: {duration}\n"
                         f"• Resolusi Maksimal: {max_height}p\n"
-                        f"• Jumlah Tayangan: {views:,}" if isinstance(views, int) else f"• Jumlah Tayangan: {views}\n"
+                        f"• Jumlah Tayangan: {views_str}\n"
                         f"• Sumber URL: {url}"
                     )
                     return ToolResult(success=True, output=out)
@@ -567,7 +568,6 @@ class MediaDownloaderTool(BaseTool):
         cmd_args = [
             shlex.quote(yt_bin),
             "--no-playlist",
-            "--no-check-certificates",
             "-o",
             shlex.quote(out_template),
         ]
@@ -687,7 +687,7 @@ class MediaDownloaderTool(BaseTool):
             cmd = (
                 f"{shlex.quote(aria_bin)} -c -s {max_conn} -x {max_conn} "
                 f"--dir={shlex.quote(output_dir)} -o {shlex.quote(final_filename)} "
-                f"--check-certificate=false {shlex.quote(url)}"
+                f"{shlex.quote(url)}"
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
             if res.success and os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
@@ -697,7 +697,7 @@ class MediaDownloaderTool(BaseTool):
         if engines.get("curl"):
             curl_bin = engines["curl"]
             cmd = (
-                f"{shlex.quote(curl_bin)} -k -L -C - -o {shlex.quote(dest_path)} "
+                f"{shlex.quote(curl_bin)} -L -C - -o {shlex.quote(dest_path)} "
                 f"--connect-timeout 15 -m {timeout} {shlex.quote(url)}"
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
@@ -708,7 +708,7 @@ class MediaDownloaderTool(BaseTool):
         if engines.get("wget"):
             wget_bin = engines["wget"]
             cmd = (
-                f"{shlex.quote(wget_bin)} --no-check-certificate -c -O {shlex.quote(dest_path)} "
+                f"{shlex.quote(wget_bin)} -c -O {shlex.quote(dest_path)} "
                 f"--timeout=15 {shlex.quote(url)}"
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
