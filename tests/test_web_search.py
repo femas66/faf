@@ -11,6 +11,10 @@ from src.tools.web_search import (
     SmartWebExtractor,
     _clean_url,
     _strip_html_tags,
+    _BOT_DETECTION_TITLE_PATTERNS,
+    _check_url_safety,
+    _unwrap_bing_url,
+    _normalize_search_query,
 )
 
 
@@ -243,3 +247,166 @@ async def test_registered_in_default_registry():
 
     reg = create_default_registry()
     assert reg.get("web_search") is not None
+
+
+def test_bot_detection_title_patterns_constant():
+    expected = (
+        "access denied", "access to this page has been denied", "blocked", "bot detected", "verification required",
+        "please verify", "are you a robot", "captcha", "cloudflare", "ddos protection", "checking your browser",
+        "just a moment", "attention required",
+    )
+    assert _BOT_DETECTION_TITLE_PATTERNS == expected
+
+
+def test_check_url_safety_valid():
+    safe, msg, info = _check_url_safety("https://id.wikipedia.org/wiki/Indonesia")
+    assert safe is True
+    assert "aman" in msg.lower()
+
+
+def test_check_url_safety_schemes():
+    for bad_url in [
+        "file:///etc/passwd",
+        "data:text/html,<h1>hacked</h1>",
+        "gopher://127.0.0.1:70",
+        "javascript:alert(1)",
+        "ftp://example.com/file",
+    ]:
+        safe, msg, info = _check_url_safety(bad_url)
+        assert safe is False
+        assert "tidak aman" in msg.lower()
+
+
+def test_check_url_safety_ssrf():
+    for ssrf_url in [
+        "http://localhost:8080/admin",
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:80",
+        "http://10.0.0.1/dashboard",
+        "http://192.168.1.1/router",
+        "http://172.16.0.5/internal",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://[::1]:8080",
+    ]:
+        safe, msg, info = _check_url_safety(ssrf_url)
+        assert safe is False
+        assert "tidak aman" in msg.lower()
+
+
+def test_check_url_safety_ports():
+    for dangerous_port_url in [
+        "http://example.com:22/secret",
+        "http://example.com:3306/db",
+        "http://example.com:6379/data",
+        "http://example.com:5432/query",
+    ]:
+        safe, msg, info = _check_url_safety(dangerous_port_url)
+        assert safe is False
+        assert "tidak aman" in msg.lower()
+
+
+def test_check_url_safety_dangerous_extensions():
+    for bad_ext in [
+        "https://example.com/download.exe",
+        "https://example.com/payload.sh",
+        "https://example.com/app.apk",
+    ]:
+        safe, msg, info = _check_url_safety(bad_ext)
+        assert safe is False
+        assert "tidak aman" in msg.lower()
+
+
+def test_unwrap_bing_url():
+    # URL encoded base64 in Bing click tracking
+    # aHR0cHM6Ly9leGFtcGxlLmNvbS9hcnRpY2xl == https://example.com/article
+    bing_link = "https://www.bing.com/ck/a?!&&p=123&u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS9hcnRpY2xl&ntb=1"
+    unwrapped = _unwrap_bing_url(bing_link)
+    assert unwrapped == "https://example.com/article"
+
+    direct_link = "https://example.com/page"
+    assert _unwrap_bing_url(direct_link) == direct_link
+
+
+def test_normalize_search_query():
+    q = "siapa pemenang indonesia vs thailand kemarin?"
+    norm = _normalize_search_query(q)
+    assert "siapa" not in norm.lower()
+    assert "?" not in norm
+    assert "indonesia" in norm
+    assert "thailand" in norm
+
+
+async def test_action_check_safety_tool():
+    tool = WebSearchTool()
+    # Safe URL
+    res_safe = await tool.execute(_ctx(), action="check_safety", url="https://example.com")
+    assert res_safe.success
+    assert "AMAN" in res_safe.output
+
+    # Unsafe URL
+    res_unsafe = await tool.execute(_ctx(), action="check_safety", url="http://127.0.0.1:8080")
+    assert not res_unsafe.success
+    assert "tidak aman" in res_unsafe.error.lower()
+
+
+async def test_visit_blocks_unsafe_url():
+    tool = WebSearchTool()
+    res = await tool.execute(_ctx(), action="visit", url="http://192.168.1.1/router")
+    assert not res.success
+    assert "tidak aman" in res.error.lower()
+
+
+async def test_visit_detects_bot_challenge():
+    tool = WebSearchTool()
+    bot_html = """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Just a moment... | Cloudflare</title></head>
+    <body><p>Please wait while we verify you are not a robot.</p></body>
+    </html>
+    """
+
+    class MockResponse:
+        status_code = 403
+        text = bot_html
+        headers = {"content-type": "text/html"}
+
+    with patch("httpx.AsyncClient.get", AsyncMock(return_value=MockResponse())):
+        res = await tool.execute(_ctx(), action="visit", url="https://example.com/protected")
+
+    assert not res.success
+    assert "bot" in res.error.lower() or "cloudflare" in res.error.lower()
+
+
+async def test_inspect_action():
+    tool = WebSearchTool()
+    sample_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Halaman Tes</title>
+      <meta name="description" content="Deskripsi Halaman" />
+      <meta property="og:title" content="OpenGraph Title" />
+    </head>
+    <body><h1>Tes</h1></body>
+    </html>
+    """
+
+    class MockResponse:
+        status_code = 200
+        text = sample_html
+        headers = {
+            "content-type": "text/html; charset=utf-8",
+            "server": "nginx",
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "DENY",
+        }
+
+    with patch("httpx.AsyncClient.get", AsyncMock(return_value=MockResponse())):
+        res = await tool.execute(_ctx(), action="inspect", url="https://example.com")
+
+    assert res.success
+    assert "200" in res.output
+    assert "Halaman Tes" in res.output
+    assert "Keamanan Header" in res.output
+

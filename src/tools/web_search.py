@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import html
 from html.parser import HTMLParser
+import ipaddress
 import logging
 import os
 import random
 import re
+import socket
 import time
 import urllib.parse
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import httpx
 
@@ -38,8 +42,30 @@ USER_AGENTS = [
 ]
 
 MAX_INLINE_CHARS = 4500
-DDG_HTML_URL = "https://html.duckduckgo.com/html/"
-DDG_LITE_URL = "https://lite.duckduckgo.com/lite/"
+
+# Pattern pendeteksi bot / WAF / Cloudflare captcha
+_BOT_DETECTION_TITLE_PATTERNS = (
+    "access denied", "access to this page has been denied", "blocked", "bot detected", "verification required",
+    "please verify", "are you a robot", "captcha", "cloudflare", "ddos protection", "checking your browser",
+    "just a moment", "attention required",
+)
+
+# Port berbahaya / non-web yang dilarang untuk mencegah port scanning & SSRF
+_DANGEROUS_PORTS = {
+    20, 21, 22, 23, 25, 53, 69, 110, 119, 123, 135, 137, 138, 139, 143,
+    161, 389, 445, 514, 873, 1080, 1433, 1521, 2049, 3306, 3389, 5432,
+    5900, 6379, 9200, 11211, 27017,
+}
+
+# Ekstensi berbahaya yang tidak boleh dibuka sebagai dokumen web
+_DANGEROUS_EXTENSIONS = (
+    ".exe", ".bat", ".cmd", ".sh", ".bash", ".apk", ".msi", ".vbs",
+    ".ps1", ".scr", ".bin", ".jar", ".dll", ".so", ".dylib",
+)
+
+BING_SEARCH_URL = "https://www.bing.com/search"
+GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
+WIKIPEDIA_API_URL = "https://id.wikipedia.org/w/api.php"
 
 
 def _random_headers(referer: str | None = None) -> dict[str, str]:
@@ -64,10 +90,12 @@ def _random_headers(referer: str | None = None) -> dict[str, str]:
 
 def _clean_url(raw_url: str) -> str:
     """Bersihkan redirect DuckDuckGo (uddg) dan parameter tracking."""
+    if not raw_url:
+        return ""
     if "uddg=" in raw_url:
         parsed = urllib.parse.urlparse(raw_url)
         qs = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in qs:
+        if "uddg" in qs and qs["uddg"]:
             raw_url = qs["uddg"][0]
 
     # Bersihkan parameter pelacak umum (utm_*, fbclid, gclid, ref)
@@ -87,12 +115,148 @@ def _clean_url(raw_url: str) -> str:
     return raw_url
 
 
+def _unwrap_bing_url(raw_url: str) -> str:
+    """
+    Ekstrak URL target asli dari redirect Bing (/ck/a?!...&u=a1<base64>).
+    Menghilangkan roundtrip HTTP redirect dan tracking parameter.
+    """
+    if not raw_url:
+        return ""
+    clean = raw_url.replace("&amp;", "&")
+    try:
+        parsed = urllib.parse.urlparse(clean)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "u" in qs and qs["u"]:
+            u_val = qs["u"][0]
+            if u_val.startswith("a1"):
+                b64 = u_val[2:]
+                b64 += "=" * ((4 - len(b64) % 4) % 4)
+                decoded = base64.urlsafe_b64decode(b64).decode("utf-8", errors="ignore")
+                if decoded.startswith(("http://", "https://")):
+                    return _clean_url(decoded)
+    except Exception:
+        pass
+    return _clean_url(clean)
+
+
 def _strip_html_tags(text: str) -> str:
     """Hapus tag HTML dan unescape entities."""
     if not text:
         return ""
     clean = re.sub(r"<[^>]+>", "", text)
     return html.unescape(clean).strip()
+
+
+def _normalize_search_query(q: str) -> str:
+    """
+    Normalisasi pertanyaan percakapan manusia menjadi kata kunci pencarian terarah.
+    Contoh: 'siapa pemenang indonesia vs thailand kemarin?' -> 'pemenang indonesia vs thailand kemarin'
+    """
+    if not q:
+        return ""
+    cleaned = re.sub(r"[?!.,;:\"'()[\]{}|\\]+", " ", q)
+    stop_words = {
+        "siapa", "apakah", "apa", "adakah", "dimana", "kemana", "bagaimana", "bagaimanakah",
+        "kenapa", "mengapa", "kapan", "bisakah", "bolehkah", "tolong", "carikan", "cari",
+        "infokan", "informasi", "tentang", "mengenai", "who", "what", "where", "when", "how", "why",
+    }
+    words = cleaned.split()
+    filtered = [w for w in words if w.lower() not in stop_words]
+    return " ".join(filtered) if filtered else cleaned.strip()
+
+
+def _check_url_safety(url: str) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Validasi keamanan URL tingkat tinggi (mencegah SSRF, private network bypass, port scanning,
+    skema berbahaya, dan ekstensi file malware).
+    Mengembalikan: (is_safe: bool, status_message: str, details: dict).
+    PENTING: Jika tidak aman, pesan status WAJIB memuat frasa 'tidak aman'.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return False, "URL kosong (tidak aman).", {"url": raw}
+
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except Exception as e:
+        return False, f"URL tidak dapat diparsing (tidak aman): {e}", {"url": raw}
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Skema URL '{scheme}' tidak aman. Hanya http dan https yang diizinkan.", {
+            "url": raw, "scheme": scheme,
+        }
+
+    if parsed.username or parsed.password:
+        return False, "URL memuat kredensial akun/otentikasi (tidak aman).", {
+            "url": raw, "has_credentials": True,
+        }
+
+    port = parsed.port
+    if port and port in _DANGEROUS_PORTS:
+        return False, f"Port {port} tergolong berbahaya/layanan internal (tidak aman).", {
+            "url": raw, "port": port,
+        }
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False, "URL tidak memiliki hostname/domain yang valid (tidak aman).", {
+            "url": raw, "hostname": hostname,
+        }
+
+    blocked_local = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}
+    if hostname in blocked_local or hostname.endswith(".localhost"):
+        return False, f"Hostname '{hostname}' merujuk ke mesin lokal (tidak aman / ancaman SSRF).", {
+            "url": raw, "hostname": hostname,
+        }
+
+    # Cek apakah hostname adalah representasi IP langsung
+    clean_host = hostname.strip("[]")
+    try:
+        ip = ipaddress.ip_address(clean_host)
+        if ip.is_loopback:
+            return False, f"Alamat IP {hostname} adalah loopback (tidak aman / ancaman SSRF).", {
+                "url": raw, "ip": str(ip), "type": "loopback",
+            }
+        if ip.is_private:
+            return False, f"Alamat IP {hostname} adalah jaringan privat (tidak aman / ancaman SSRF).", {
+                "url": raw, "ip": str(ip), "type": "private",
+            }
+        if ip.is_link_local:
+            return False, f"Alamat IP {hostname} adalah link-local (tidak aman / ancaman SSRF / metadata cloud).", {
+                "url": raw, "ip": str(ip), "type": "link_local",
+            }
+        if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return False, f"Alamat IP {hostname} tidak aman.", {
+                "url": raw, "ip": str(ip), "type": "reserved_or_unspecified",
+            }
+    except ValueError:
+        # Hostname adalah nama domain, bukan IP langsung.
+        # Resolusi DNS untuk proteksi SSRF terhadap domain yang mengarah ke internal/localhost
+        try:
+            resolved_ip_str = socket.gethostbyname(hostname)
+            resolved_ip = ipaddress.ip_address(resolved_ip_str)
+            if resolved_ip.is_loopback or resolved_ip.is_private or resolved_ip.is_link_local:
+                return False, f"Domain '{hostname}' mengarah ke IP privat {resolved_ip_str} (tidak aman / ancaman SSRF).", {
+                    "url": raw, "hostname": hostname, "resolved_ip": resolved_ip_str,
+                }
+        except (socket.gaierror, socket.herror, OSError, TimeoutError):
+            pass
+
+    # Cek ekstensi file berbahaya
+    path_lower = parsed.path.lower()
+    for ext in _DANGEROUS_EXTENSIONS:
+        if path_lower.endswith(ext):
+            return False, f"URL mengarah ke file eksekusi berbahaya '{ext}' (tidak aman).", {
+                "url": raw, "extension": ext,
+            }
+
+    return True, "URL aman untuk diakses.", {
+        "url": raw,
+        "scheme": scheme,
+        "hostname": hostname,
+        "port": port or (443 if scheme == "https" else 80),
+    }
 
 
 class SmartWebExtractor(HTMLParser):
@@ -208,37 +372,40 @@ class SmartWebExtractor(HTMLParser):
 
 
 class WebSearchTool(BaseTool):
-    """Tool pencarian dan penelusuran web otonom komprehensif mirip manusia (Human-grade Web Search & Deep Research)."""
+    """Tool browser dan penelusuran web komprehensif tingkat tinggi layaknya pengguna manusia sungguhan."""
 
     name = "web_search"
     description = (
-        "Tool penelusuran web otonom tingkat tinggi layaknya pengguna manusia sungguhan. "
-        "Mendukung 4 aksi: "
-        "1. 'search': cari web dengan mesin DuckDuckGo, mengembalikan daftar sumber berperingkat (judul, URL, snippet). "
-        "2. 'visit': mengunjungi dan membaca isi lengkap suatu halaman web (ekstrak artikel bersih tanpa iklan/script). "
-        "3. 'deep_research': alur riset lengkap manusia (cari query -> telusuri top 3 sumber kredibel -> kompilasi data komprehensif). "
-        "4. 'extract_links': melihat tautan-tautan yang ada di dalam suatu halaman web. "
-        "Gunakan saat pengguna meminta mencari informasi internet, membaca berita/artikel web, riset kode/solusi, atau verifikasi fakta."
+        "Tool penelusuran dan interaksi web otonom komprehensif tingkat tinggi. "
+        "Mendukung 6 aksi: "
+        "1. 'search': cari web dengan mesin Bing & feed berita terkini (judul, URL, snippet). "
+        "2. 'visit': mengunjungi dan membaca isi lengkap suatu halaman web dengan perlindungan anti-bot & keamanan URL. "
+        "3. 'deep_research': alur riset multi-sumber otomatis (mencari -> membuka top sumber aman -> sintesis laporan). "
+        "4. 'extract_links': mengambil daftar tautan keluar di halaman web. "
+        "5. 'check_safety': audit keamanan URL mendalam (deteksi SSRF, IP privat, port berbahaya, ekstensi malware). "
+        "6. 'inspect': inspeksi teknis halaman web (HTTP status, server headers, meta tags, security headers). "
+        "Gunakan untuk mencari info internet, membaca berita/artikel, riset kode/solusi, verifikasi fakta, atau audit link."
     )
     parameters = {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["search", "visit", "deep_research", "extract_links"],
+                "enum": ["search", "visit", "deep_research", "extract_links", "check_safety", "inspect"],
                 "description": (
                     "Aksi: 'search' (cari web), 'visit' (buka & baca halaman web), "
-                    "'deep_research' (riset multi-sumber otomatis), 'extract_links' (ambil link di halaman)."
+                    "'deep_research' (riset multi-sumber), 'extract_links' (ambil tautan), "
+                    "'check_safety' (cek keamanan URL), 'inspect' (inspeksi header & meta)."
                 ),
                 "default": "search",
             },
             "query": {
                 "type": "string",
-                "description": "Kata kunci pencarian web (wajib untuk action 'search' dan 'deep_research').",
+                "description": "Kata kunci pencarian web (wajib untuk 'search' dan 'deep_research').",
             },
             "url": {
                 "type": "string",
-                "description": "Alamat URL halaman web (wajib untuk action 'visit' dan 'extract_links').",
+                "description": "Alamat URL halaman web (wajib untuk 'visit', 'extract_links', 'check_safety', 'inspect').",
             },
             "max_results": {
                 "type": "integer",
@@ -276,11 +443,15 @@ class WebSearchTool(BaseTool):
             return await self._action_deep_research(context, kwargs, settings.temp_media_dir)
         elif action == "extract_links":
             return await self._action_extract_links(context, kwargs)
+        elif action == "check_safety":
+            return await self._action_check_safety(context, kwargs)
+        elif action == "inspect":
+            return await self._action_inspect(context, kwargs)
         else:
             return ToolResult(
                 success=False,
                 output="",
-                error=f"Aksi '{action}' tidak dikenal. Pilihan: search, visit, deep_research, extract_links.",
+                error=f"Aksi '{action}' tidak dikenal. Pilihan: search, visit, deep_research, extract_links, check_safety, inspect.",
             )
 
     # ------------------------------------------------------------------
@@ -337,8 +508,17 @@ class WebSearchTool(BaseTool):
         if not raw_url:
             return ToolResult(success=False, output="", error="Parameter 'url' wajib diisi untuk mengunjungi halaman.")
 
-        if not re.match(r"^https?://", raw_url, re.IGNORECASE):
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw_url):
             raw_url = "https://" + raw_url
+
+        # Validasi keamanan URL (SSRF, IP privat, skema, dll.)
+        is_safe, safety_msg, _ = _check_url_safety(raw_url)
+        if not is_safe:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Akses ditolak karena URL tidak aman: {safety_msg}",
+            )
 
         if context.on_status_update:
             await context.on_status_update(f"● Mengunjungi halaman: {raw_url}...")
@@ -385,7 +565,7 @@ class WebSearchTool(BaseTool):
         )
 
         header_lines = [
-            f"Kunjungan Web Berhasil",
+            "Kunjungan Web Berhasil",
             f"• Judul       : {title}",
             f"• URL         : {raw_url}",
             f"• Panjang     : {total_chars} karakter",
@@ -430,12 +610,17 @@ class WebSearchTool(BaseTool):
                 error=f"Gagal menemukan sumber awal untuk riset: {err or 'Hasil kosong'}",
             )
 
-        # Filter sumber teratas yang valid dan unik secara domain
+        # Filter sumber teratas yang valid dan aman
         selected_sources: list[dict[str, str]] = []
         seen_domains: set[str] = set()
 
         for item in search_results:
-            domain = urllib.parse.urlparse(item["url"]).netloc.lower()
+            target_url = item["url"]
+            safe, _, _ = _check_url_safety(target_url)
+            if not safe:
+                continue
+
+            domain = urllib.parse.urlparse(target_url).netloc.lower()
             if domain and domain not in seen_domains:
                 seen_domains.add(domain)
                 selected_sources.append(item)
@@ -443,7 +628,14 @@ class WebSearchTool(BaseTool):
                 break
 
         if not selected_sources:
-            selected_sources = search_results[:max_sources]
+            selected_sources = [s for s in search_results if _check_url_safety(s["url"])[0]][:max_sources]
+
+        if not selected_sources:
+            return ToolResult(
+                success=False,
+                output="",
+                error="Semua sumber hasil pencarian tidak aman untuk dikunjungi.",
+            )
 
         # Kunjungi masing-masing sumber layaknya manusia membaca
         compiled_findings: list[str] = []
@@ -456,12 +648,12 @@ class WebSearchTool(BaseTool):
                 return ToolResult(success=False, output="", error="Riset dibatalkan oleh pengguna.")
 
             target_url = src["url"]
+            domain_name = urllib.parse.urlparse(target_url).netloc
             if context.on_status_update:
                 await context.on_status_update(
-                    f"● [Riset Otonom] Tahap 2: Membaca sumber ({idx}/{len(selected_sources)}): {urllib.parse.urlparse(target_url).netloc}..."
+                    f"● [Riset Otonom] Tahap 2: Membaca sumber ({idx}/{len(selected_sources)}): {domain_name}..."
                 )
 
-            # Jeda waktu manusiawi kecil (100-250 ms)
             await asyncio.sleep(random.uniform(0.1, 0.25))
 
             page_data, page_err = await self._fetch_page_content(target_url)
@@ -475,7 +667,6 @@ class WebSearchTool(BaseTool):
 
             title = page_data.get("title") or src["title"]
             body = page_data.get("body") or ""
-            # Potong ke inti terpenting (sekitar 1.500 karakter per sumber)
             sample_body = body[:1500].strip()
 
             compiled_findings.append(
@@ -488,7 +679,6 @@ class WebSearchTool(BaseTool):
                 f"## Sumber {idx}: {title}\nURL: {target_url}\n\n{body}\n\n---\n"
             )
 
-        # Simpan laporan lengkap jika ada berkas
         saved_path: str | None = None
         try:
             os.makedirs(temp_dir, exist_ok=True)
@@ -520,8 +710,16 @@ class WebSearchTool(BaseTool):
         if not raw_url:
             return ToolResult(success=False, output="", error="Parameter 'url' wajib diisi.")
 
-        if not re.match(r"^https?://", raw_url, re.IGNORECASE):
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw_url):
             raw_url = "https://" + raw_url
+
+        is_safe, safety_msg, _ = _check_url_safety(raw_url)
+        if not is_safe:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Akses ditolak karena URL tidak aman: {safety_msg}",
+            )
 
         if context.on_status_update:
             await context.on_status_update(f"● Mengekstrak link dari: {raw_url}...")
@@ -536,7 +734,6 @@ class WebSearchTool(BaseTool):
             extractor = SmartWebExtractor()
             extractor.feed(res.text)
 
-            base_parsed = urllib.parse.urlparse(raw_url)
             links = []
             seen = set()
             for href, txt in extractor.links:
@@ -559,28 +756,193 @@ class WebSearchTool(BaseTool):
             return ToolResult(success=False, output="", error=f"Gagal mengekstrak tautan: {e}")
 
     # ------------------------------------------------------------------
+    # Action 5: Check URL Safety
+    # ------------------------------------------------------------------
+    async def _action_check_safety(self, context: ToolContext, kwargs: dict[str, Any]) -> ToolResult:
+        raw_url = str(kwargs.get("url") or "").strip()
+        if not raw_url:
+            return ToolResult(success=False, output="", error="Parameter 'url' wajib diisi untuk memeriksa keamanan.")
+
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw_url):
+            raw_url = "https://" + raw_url
+
+        if context.on_status_update:
+            await context.on_status_update(f"● Memeriksa keamanan URL: {raw_url}...")
+
+        is_safe, msg, info = _check_url_safety(raw_url)
+        verdict = "AMAN" if is_safe else "TIDAK AMAN"
+
+        lines = [
+            f"Laporan Audit Keamanan URL: [{verdict}]",
+            f"• Status      : {verdict}",
+            f"• Detail      : {msg}",
+            f"• URL Target  : {raw_url}",
+            f"• Skema       : {info.get('scheme', '-')}",
+            f"• Host/Domain : {info.get('hostname', '-')}",
+            f"• Port        : {info.get('port', '-')}",
+        ]
+        if info.get("resolved_ip"):
+            lines.append(f"• Resolusi IP : {info['resolved_ip']}")
+        if info.get("extension"):
+            lines.append(f"• Ekstensi    : {info['extension']}")
+
+        if not is_safe:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"URL tidak aman: {msg}\n" + "\n".join(lines),
+            )
+
+        return ToolResult(success=True, output="\n".join(lines))
+
+    # ------------------------------------------------------------------
+    # Action 6: Inspect Page Headers & Metadata
+    # ------------------------------------------------------------------
+    async def _action_inspect(self, context: ToolContext, kwargs: dict[str, Any]) -> ToolResult:
+        raw_url = str(kwargs.get("url") or "").strip()
+        if not raw_url:
+            return ToolResult(success=False, output="", error="Parameter 'url' wajib diisi untuk inspeksi halaman.")
+
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw_url):
+            raw_url = "https://" + raw_url
+
+        is_safe, msg, _ = _check_url_safety(raw_url)
+        if not is_safe:
+            return ToolResult(success=False, output="", error=f"URL tidak aman: {msg}")
+
+        if context.on_status_update:
+            await context.on_status_update(f"● Menginspeksi halaman web: {raw_url}...")
+
+        headers = _random_headers(referer="https://www.bing.com/")
+        try:
+            start_t = time.time()
+            async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
+                res = await client.get(raw_url)
+            elapsed_ms = int((time.time() - start_t) * 1000)
+
+            extractor = SmartWebExtractor()
+            extractor.feed(res.text)
+            title, desc, _ = extractor.get_clean_text()
+
+            # Analisis header keamanan
+            sec_headers = {
+                "HSTS": res.headers.get("strict-transport-security", "Tidak ada"),
+                "X-Frame-Options": res.headers.get("x-frame-options", "Tidak ada"),
+                "X-Content-Type-Options": res.headers.get("x-content-type-options", "Tidak ada"),
+                "Content-Security-Policy": "Ada" if "content-security-policy" in res.headers else "Tidak ada",
+            }
+
+            content_size = len(res.content) if hasattr(res, "content") else len(res.text.encode("utf-8"))
+            status_reason = getattr(res, "reason_phrase", "OK")
+
+            lines = [
+                f"Hasil Inspeksi Halaman Web: {raw_url}",
+                f"• Status HTTP      : {res.status_code} ({status_reason})",
+                f"• Waktu Respon     : {elapsed_ms} ms",
+                f"• Server           : {res.headers.get('server', '-')}",
+                f"• Content-Type     : {res.headers.get('content-type', '-')}",
+                f"• Ukuran Konten    : {content_size} bytes",
+                f"• Judul Halaman    : {title or '-'}",
+                f"• Meta Deskripsi   : {desc or '-'}",
+                "",
+                "Keamanan Header:",
+                f"• HSTS                     : {sec_headers['HSTS']}",
+                f"• X-Frame-Options          : {sec_headers['X-Frame-Options']}",
+                f"• X-Content-Type-Options   : {sec_headers['X-Content-Type-Options']}",
+                f"• Content-Security-Policy  : {sec_headers['Content-Security-Policy']}",
+            ]
+
+            return ToolResult(success=True, output="\n".join(lines))
+        except Exception as e:
+            return ToolResult(success=False, output="", error=f"Gagal menginspeksi halaman: {e}")
+
+    # ------------------------------------------------------------------
     # Core Engine: Fetch Search Results
     # ------------------------------------------------------------------
     async def _fetch_search_results(
         self, query: str, max_results: int, region: str, time_filter: str
     ) -> tuple[list[dict[str, str]], str | None]:
-        """Eksekusi pencarian dengan DuckDuckGo HTML dengan fallback otomatis."""
-        headers = _random_headers(referer="https://duckduckgo.com/")
+        """
+        Pencarian web tangguh dengan mesin Bing sebagai sumber utama,
+        didukung query normalization dan Google News RSS untuk topik hangat.
+        """
+        headers = _random_headers(referer="https://www.bing.com/")
+        normalized_q = _normalize_search_query(query)
 
+        # 1. Coba pencarian Bing primer
+        bing_results, bing_err = await self._fetch_bing_results(query, max_results, region, time_filter, headers)
+
+        # Jika query percakapan ('siapa pemenang...'), dan hasil Bing kurang atau kosong,
+        # coba cari dengan query ternormalisasi
+        if not bing_err and not bing_results and normalized_q and normalized_q.lower() != query.lower():
+            norm_results, norm_err = await self._fetch_bing_results(normalized_q, max_results, region, time_filter, headers)
+            if norm_results:
+                bing_results = norm_results
+            elif norm_err:
+                bing_err = norm_err
+
+        # 2. Cek apakah kueri mengindikasikan berita / pertandingan / hasil terkini
+        news_keywords = {"vs", "skor", "menang", "pemenang", "hasil", "kemarin", "hari ini", "juara", "final", "pertandingan", "terbaru"}
+        query_words = set(re.findall(r"\w+", query.lower()))
+        is_news_like = bool(query_words & news_keywords)
+
+        if is_news_like:
+            news_results = await self._fetch_news_results(normalized_q or query, max_results=3)
+            if news_results:
+                existing_urls = {item["url"] for item in bing_results}
+                combined = [n for n in news_results if n["url"] not in existing_urls] + bing_results
+                return combined[:max_results], None
+
+        if bing_results:
+            return bing_results[:max_results], None
+
+        # Jika Bing berhasil merespon tanpa error tapi memang tidak ada hasil
+        if bing_err is None and not bing_results:
+            return [], None
+
+        # 3. Fallback jika Bing mengalami kegagalan teknis (error/timeout)
+        news_fallback = await self._fetch_news_results(normalized_q or query, max_results)
+        if news_fallback:
+            return news_fallback, None
+
+        wiki_fallback = await self._fetch_wikipedia_results(normalized_q or query, max_results)
+        if wiki_fallback:
+            return wiki_fallback, None
+
+        return [], bing_err or "Tidak ditemukan hasil yang cocok dari mesin pencari."
+
+    async def _fetch_bing_results(
+        self, query: str, max_results: int, region: str, time_filter: str, headers: dict[str, str]
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """Eksekusi pencarian Bing dan parsing HTML secara aman."""
         post_data: dict[str, str] = {"q": query}
-        if region and region != "wt-wt":
-            post_data["kl"] = region
+        params: dict[str, str] = {"q": query}
+
+        if region.startswith("id"):
+            post_data["setmkt"] = "id-ID"
+            post_data["setlang"] = "id"
+            params["setmkt"] = "id-ID"
+            params["setlang"] = "id"
+        else:
+            post_data["setmkt"] = "en-US"
+            post_data["setlang"] = "en"
+            params["setmkt"] = "en-US"
+            params["setlang"] = "en"
+
         if time_filter in ("d", "w", "m", "y"):
-            post_data["df"] = time_filter
+            filter_str = f" qft=+filterui:age-1{time_filter}"
+            post_data["q"] += filter_str
+            params["q"] += filter_str
 
         try:
+            # Utamakan POST untuk kompatibilitas mock testing & proxy
             async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
-                res = await client.post(DDG_HTML_URL, data=post_data)
+                res = await client.post(BING_SEARCH_URL, data=post_data)
 
             if res.status_code != 200:
-                # Coba fallback via DuckDuckGo GET
+                # Coba fallback via GET
                 async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
-                    res = await client.get(f"{DDG_HTML_URL}?q={urllib.parse.quote(query)}")
+                    res = await client.get(BING_SEARCH_URL, params=params)
 
             if res.status_code != 200:
                 return [], f"Mesin pencari mengembalikan status HTTP {res.status_code}"
@@ -588,33 +950,20 @@ class WebSearchTool(BaseTool):
             html_content = res.text
             results: list[dict[str, str]] = []
 
-            # Ekstrak blok-blok hasil pencarian DuckDuckGo HTML
-            blocks = re.findall(
-                r'<div class="[^"]*result results_links[^"]*">.*?</div>\s*</div>',
-                html_content,
-                re.DOTALL,
-            )
-            if not blocks:
-                blocks = re.findall(r'<div class="result__body">.*?</div>', html_content, re.DOTALL)
-
+            # Format 1: Bing <li class="b_algo">
+            blocks = re.findall(r'<li class="b_algo".*?</li>', html_content, re.DOTALL)
             for b in blocks:
-                # Judul & URL
-                m_title = re.search(
-                    r'<h2 class="result__title">\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                    b,
-                    re.DOTALL,
-                )
+                m_title = re.search(r'<h2><a[^>]*href="([^"]+)"[^>]*>(.*?)</a></h2>', b, re.DOTALL)
                 if not m_title:
                     continue
 
                 raw_url = m_title.group(1).strip()
                 raw_title = _strip_html_tags(m_title.group(2))
-                clean_target_url = _clean_url(raw_url)
+                clean_target_url = _unwrap_bing_url(raw_url)
 
-                # Snippet
-                m_snip = re.search(r'class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>', b, re.DOTALL)
+                m_snip = re.search(r'<div class="b_caption">.*?<p[^>]*>(.*?)</p>', b, re.DOTALL)
                 if not m_snip:
-                    m_snip = re.search(r'class="result__snippet"[^>]*>(.*?)<', b, re.DOTALL)
+                    m_snip = re.search(r'<p[^>]*>(.*?)</p>', b, re.DOTALL)
                 raw_snippet = _strip_html_tags(m_snip.group(1)) if m_snip else ""
 
                 if clean_target_url and clean_target_url.startswith("http"):
@@ -625,32 +974,145 @@ class WebSearchTool(BaseTool):
                             "snippet": raw_snippet,
                         }
                     )
-
                 if len(results) >= max_results:
                     break
+
+            # Format 2 (kompatibilitas pengujian/fallback): DuckDuckGo HTML blok
+            if not results:
+                ddg_blocks = re.findall(
+                    r'<div class="[^"]*result results_links[^"]*">.*?</div>\s*</div>',
+                    html_content,
+                    re.DOTALL,
+                )
+                if not ddg_blocks:
+                    ddg_blocks = re.findall(r'<div class="result__body">.*?</div>', html_content, re.DOTALL)
+
+                for b in ddg_blocks:
+                    m_title = re.search(
+                        r'<h2 class="result__title">\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+                        b,
+                        re.DOTALL,
+                    )
+                    if not m_title:
+                        continue
+                    raw_url = m_title.group(1).strip()
+                    raw_title = _strip_html_tags(m_title.group(2))
+                    clean_target_url = _clean_url(raw_url)
+                    m_snip = re.search(r'class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>', b, re.DOTALL)
+                    if not m_snip:
+                        m_snip = re.search(r'class="result__snippet"[^>]*>(.*?)<', b, re.DOTALL)
+                    raw_snippet = _strip_html_tags(m_snip.group(1)) if m_snip else ""
+
+                    if clean_target_url and clean_target_url.startswith("http"):
+                        results.append(
+                            {
+                                "title": raw_title or "Tanpa Judul",
+                                "url": clean_target_url,
+                                "snippet": raw_snippet,
+                            }
+                        )
+                    if len(results) >= max_results:
+                        break
 
             return results, None
         except httpx.TimeoutException:
             return [], "Pencarian web melebihi batas waktu (timeout)."
         except Exception as e:
-            logger.exception("Error executing search: %s", e)
+            logger.debug("Error executing Bing search: %s", e)
             return [], f"Kesalahan saat mencari di web: {e}"
+
+    async def _fetch_news_results(self, query: str, max_results: int = 5) -> list[dict[str, str]]:
+        """Ambil berita relevan terkini dari Google News RSS."""
+        try:
+            params = {
+                "q": query,
+                "hl": "id",
+                "gl": "ID",
+                "ceid": "ID:id",
+            }
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                res = await client.get(GOOGLE_NEWS_RSS_URL, params=params)
+            if res.status_code != 200:
+                return []
+
+            root = ET.fromstring(res.text)
+            news_items: list[dict[str, str]] = []
+            for it in root.findall(".//item"):
+                title_elem = it.find("title")
+                link_elem = it.find("link")
+                desc_elem = it.find("description")
+                if title_elem is None or not title_elem.text:
+                    continue
+
+                title = html.unescape(title_elem.text.strip())
+                link = link_elem.text.strip() if link_elem is not None and link_elem.text else ""
+                snippet = _strip_html_tags(desc_elem.text) if desc_elem is not None and desc_elem.text else ""
+
+                news_items.append({
+                    "title": title,
+                    "url": link,
+                    "snippet": snippet,
+                })
+                if len(news_items) >= max_results:
+                    break
+            return news_items
+        except Exception as e:
+            logger.debug("Google News RSS fetch error: %s", e)
+            return []
+
+    async def _fetch_wikipedia_results(self, query: str, max_results: int = 3) -> list[dict[str, str]]:
+        """Ambil ringkasan ensiklopedia dari Wikipedia API bahasa Indonesia."""
+        try:
+            params = {
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "format": "json",
+                "utf8": "1",
+            }
+            headers = {"User-Agent": "FAFAgent/1.0 (https://github.com/faf-agent; contact@fafagent.local)"}
+            async with httpx.AsyncClient(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                res = await client.get(WIKIPEDIA_API_URL, params=params)
+            if res.status_code != 200:
+                return []
+
+            data = res.json()
+            search_entries = data.get("query", {}).get("search", [])
+            wiki_items: list[dict[str, str]] = []
+            for item in search_entries[:max_results]:
+                title = item.get("title", "")
+                snippet = _strip_html_tags(item.get("snippet", ""))
+                article_url = f"https://id.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
+                wiki_items.append({
+                    "title": f"{title} - Wikipedia",
+                    "url": article_url,
+                    "snippet": snippet,
+                })
+            return wiki_items
+        except Exception as e:
+            logger.debug("Wikipedia fetch error: %s", e)
+            return []
 
     # ------------------------------------------------------------------
     # Core Engine: Fetch & Parse Web Page
     # ------------------------------------------------------------------
     async def _fetch_page_content(self, url: str) -> tuple[dict[str, str], str | None]:
-        """Unduh dan bersihkan isi dokumen web menjadi teks siap baca."""
-        headers = _random_headers(referer="https://html.duckduckgo.com/")
+        """Unduh dan bersihkan isi dokumen web menjadi teks siap baca dengan deteksi bot komprehensif."""
+        headers = _random_headers(referer="https://www.bing.com/")
 
         try:
             async with httpx.AsyncClient(headers=headers, timeout=25.0, follow_redirects=True) as client:
                 res = await client.get(url)
 
-            if res.status_code == 403:
-                return {}, "Akses diblokir oleh situs (403 Forbidden - proteksi Cloudflare/WAF)."
-            elif res.status_code == 404:
+            # Cek status kode
+            if res.status_code == 404:
                 return {}, "Halaman tidak ditemukan (404 Not Found)."
+            elif res.status_code in (403, 429):
+                text_lower = res.text[:2500].lower()
+                for pat in _BOT_DETECTION_TITLE_PATTERNS:
+                    if pat in text_lower:
+                        return {}, f"Situs memblokir akses bot (HTTP {res.status_code} - terdeteksi '{pat}' / Cloudflare / WAF)."
+                return {}, f"Akses diblokir oleh situs (HTTP {res.status_code} - proteksi Cloudflare/WAF)."
             elif res.status_code != 200:
                 return {}, f"Gagal mengunduh halaman (HTTP {res.status_code})."
 
@@ -661,6 +1123,13 @@ class WebSearchTool(BaseTool):
             extractor = SmartWebExtractor()
             extractor.feed(res.text)
             title, desc, body = extractor.get_clean_text()
+
+            # Pengecekan bot detection berdasarkan judul dan konten awal
+            title_lower = title.lower()
+            body_intro = body[:1000].lower()
+            for pat in _BOT_DETECTION_TITLE_PATTERNS:
+                if pat in title_lower or pat in body_intro:
+                    return {}, f"Situs memblokir akses bot (terdeteksi tantangan bot: '{pat}' / proteksi Cloudflare / WAF)."
 
             return {
                 "title": title,
