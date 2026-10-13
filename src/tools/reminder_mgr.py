@@ -15,8 +15,11 @@ import httpx
 
 from src.config import get_settings
 from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.path_security import get_default_state_path, validate_cron_state_path
 
 logger = logging.getLogger("faf_agent.tools.reminder_mgr")
+
+DEFAULT_REMINDERS_PATH = get_default_state_path("reminders.json")
 
 HARI_INDONESIA = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 BULAN_INDONESIA = [
@@ -87,35 +90,50 @@ class ReminderItem:
 class ReminderStore:
     """Persistent JSON storage for scheduled reminders and cronjobs."""
 
-    def __init__(self, file_path: str = "data/reminders.json") -> None:
-        self.file_path = file_path
+    def __init__(self, file_path: str | None = None) -> None:
+        target_path = file_path or DEFAULT_REMINDERS_PATH
+        ok, err_msg, validated = validate_cron_state_path(target_path)
+        if not ok:
+            raise ValueError(f"Invalid reminder store path '{target_path}': {err_msg}")
+        self.file_path = str(validated)
         self._reminders: dict[str, ReminderItem] = {}
         self._lock = asyncio.Lock()
         self.load()
 
     def load(self) -> None:
         """Load stored reminders from JSON file if exists."""
-        if not os.path.exists(self.file_path):
+        ok, err_msg, validated = validate_cron_state_path(self.file_path)
+        if not ok:
+            logger.error(f"Cannot load reminders, invalid path '{self.file_path}': {err_msg}")
+            return
+        clean_path = str(validated)
+        if not os.path.exists(clean_path):
             return
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(clean_path, "r", encoding="utf-8") as f:
                 raw_list = json.load(f)
                 if isinstance(raw_list, list):
                     for item in raw_list:
                         rem = ReminderItem.from_dict(item)
                         self._reminders[rem.id] = rem
-            logger.info(f"Loaded {len(self._reminders)} reminders from {self.file_path}")
+            logger.info(f"Loaded {len(self._reminders)} reminders from {clean_path}")
         except Exception as e:
-            logger.error(f"Failed to load reminders from {self.file_path}: {e}")
+            logger.error(f"Failed to load reminders from {clean_path}: {e}")
 
     def save(self) -> None:
         """Persist reminders to disk."""
+        ok, err_msg, validated = validate_cron_state_path(self.file_path)
+        if not ok:
+            logger.error(f"Cannot save reminders, invalid path '{self.file_path}': {err_msg}")
+            raise ValueError(f"Path keamanan penyimpanan reminder tidak valid: {err_msg}")
+        clean_path = str(validated)
         try:
-            os.makedirs(os.path.dirname(self.file_path) or ".", exist_ok=True)
-            with open(self.file_path, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(clean_path) or ".", exist_ok=True)
+            with open(clean_path, "w", encoding="utf-8") as f:
                 json.dump([rem.to_dict() for rem in self._reminders.values()], f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save reminders: {e}")
+            raise
 
     async def add(self, item: ReminderItem) -> None:
         async with self._lock:

@@ -389,7 +389,14 @@ class ProductivityControlTool(BaseTool):
             if not number:
                 return ToolResult(success=False, output="", error="Parameter 'phone_number' wajib diisi untuk make_call.")
 
-            clean_number = re.sub(r"[^\d+*#,]", "", number)
+            if "*" in number or "#" in number:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Akses ditolak: Panggilan ke kode USSD/MMI ({number}) diblokir demi keamanan perangkat.",
+                )
+
+            clean_number = re.sub(r"[^\d+,]", "", number)
             dial_target = clean_number or number
             res = await bridge.execute_shell(f"termux-telephony-call {shlex.quote(dial_target)}")
             if not res.success and bridge.is_root_available():

@@ -17,8 +17,11 @@ import httpx
 from src.config import get_settings
 from src.core.android_bridge import bridge
 from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.path_security import get_default_state_path, validate_cron_state_path
 
 logger = logging.getLogger("faf_agent.tools.cronjob_mgr")
+
+DEFAULT_CRONJOBS_PATH = get_default_state_path("cronjobs.json")
 
 HARI_INDONESIA = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 BULAN_INDONESIA = [
@@ -222,33 +225,48 @@ class CronJobItem:
 class CronJobStore:
     """Thread-safe persistent JSON store for faf-agent cronjobs."""
 
-    def __init__(self, file_path: str = "data/cronjobs.json") -> None:
-        self.file_path = file_path
+    def __init__(self, file_path: str | None = None) -> None:
+        target_path = file_path or DEFAULT_CRONJOBS_PATH
+        ok, err_msg, validated = validate_cron_state_path(target_path)
+        if not ok:
+            raise ValueError(f"Invalid cronjob store path '{target_path}': {err_msg}")
+        self.file_path = str(validated)
         self._jobs: dict[str, CronJobItem] = {}
         self._lock = asyncio.Lock()
         self.load()
 
     def load(self) -> None:
-        if not os.path.exists(self.file_path):
+        ok, err_msg, validated = validate_cron_state_path(self.file_path)
+        if not ok:
+            logger.error(f"Cannot load cronjobs, invalid path '{self.file_path}': {err_msg}")
+            return
+        clean_path = str(validated)
+        if not os.path.exists(clean_path):
             return
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(clean_path, "r", encoding="utf-8") as f:
                 raw_list = json.load(f)
                 if isinstance(raw_list, list):
                     for item in raw_list:
                         job = CronJobItem.from_dict(item)
                         self._jobs[job.id] = job
-            logger.info(f"Loaded {len(self._jobs)} cronjobs from {self.file_path}")
+            logger.info(f"Loaded {len(self._jobs)} cronjobs from {clean_path}")
         except Exception as e:
-            logger.error(f"Failed to load cronjobs from {self.file_path}: {e}")
+            logger.error(f"Failed to load cronjobs from {clean_path}: {e}")
 
     def save(self) -> None:
+        ok, err_msg, validated = validate_cron_state_path(self.file_path)
+        if not ok:
+            logger.error(f"Cannot save cronjobs, invalid path '{self.file_path}': {err_msg}")
+            raise ValueError(f"Path keamanan penyimpanan cronjob tidak valid: {err_msg}")
+        clean_path = str(validated)
         try:
-            os.makedirs(os.path.dirname(self.file_path) or ".", exist_ok=True)
-            with open(self.file_path, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(clean_path) or ".", exist_ok=True)
+            with open(clean_path, "w", encoding="utf-8") as f:
                 json.dump([j.to_dict() for j in self._jobs.values()], f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save cronjobs: {e}")
+            raise
 
     async def add(self, item: CronJobItem) -> None:
         async with self._lock:
@@ -384,23 +402,29 @@ class CronJobWorker:
             elif mode == "state_changed":
                 # Check delta against saved state
                 state_cfg = job.state_config or {}
-                state_path = state_cfg.get("state_path")
+                raw_state_path = state_cfg.get("state_path") or get_default_state_path(f"{job.id}.state")
+                ok, err_msg, validated_state_path = validate_cron_state_path(raw_state_path)
+                if not ok:
+                    logger.warning(f"Invalid state_path for cronjob '{job.id}': {err_msg}")
+                    validated_state_path = None
+
                 prev_val = None
-                if state_path and os.path.exists(os.path.expanduser(state_path)):
+                if validated_state_path and os.path.exists(str(validated_state_path)):
                     try:
-                        with open(os.path.expanduser(state_path), "r", encoding="utf-8") as sf:
+                        with open(str(validated_state_path), "r", encoding="utf-8") as sf:
                             prev_val = sf.read().strip()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to read state for job '{job.id}': {e}")
+
                 if prev_val != output:
                     should_trigger = True
-                    if state_path:
+                    if validated_state_path:
                         try:
-                            os.makedirs(os.path.dirname(os.path.expanduser(state_path)) or ".", exist_ok=True)
-                            with open(os.path.expanduser(state_path), "w", encoding="utf-8") as sf:
+                            os.makedirs(os.path.dirname(str(validated_state_path)) or ".", exist_ok=True)
+                            with open(str(validated_state_path), "w", encoding="utf-8") as sf:
                                 sf.write(output)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Failed to write state for job '{job.id}': {e}")
 
             # 3. Check Cooldown
             if should_trigger and trigger_policy.get("cooldown_after_trigger"):

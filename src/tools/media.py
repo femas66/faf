@@ -173,7 +173,7 @@ class MediaControlTool(BaseTool):
             filepath = os.path.join(settings.temp_media_dir, filename)
 
             res = await bridge.execute_shell(
-                f"termux-camera-photo -c {cam_id} '{filepath}'",
+                f"termux-camera-photo -c {cam_id} {shlex.quote(filepath)}",
                 timeout=15,
             )
 
@@ -201,7 +201,7 @@ class MediaControlTool(BaseTool):
 
             # Start recording
             res_start = await bridge.execute_shell(
-                f"termux-microphone-record -f '{filepath}' -l {dur} -e m4a",
+                f"termux-microphone-record -f {shlex.quote(filepath)} -l {dur} -e m4a",
                 timeout=5,
             )
 

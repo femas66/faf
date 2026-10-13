@@ -193,3 +193,60 @@ def test_validate_credential_access():
 
     ok_safe, msg_safe = validate_credential_access("/sdcard/Notes/belanja.txt")
     assert ok_safe is True
+
+
+def test_standardized_state_paths_and_store_validation(tmp_path):
+    from src.tools.path_security import (
+        DEFAULT_DATA_DIR,
+        get_default_data_dir,
+        get_default_state_path,
+        validate_cron_state_path,
+    )
+    from src.tools.reminder_mgr import ReminderStore, DEFAULT_REMINDERS_PATH
+    from src.tools.cronjob_mgr import CronJobStore, DEFAULT_CRONJOBS_PATH
+
+    # 1. Standardized paths are absolute and point to ~/.faf_agent/data
+    data_dir = get_default_data_dir()
+    assert os.path.isabs(str(data_dir))
+    assert str(data_dir) == os.path.expanduser(DEFAULT_DATA_DIR)
+    assert os.path.exists(str(data_dir))
+
+    rem_path = get_default_state_path("reminders.json")
+    assert rem_path == DEFAULT_REMINDERS_PATH
+    assert os.path.isabs(rem_path)
+    assert rem_path.endswith(os.path.join(".faf_agent", "data", "reminders.json"))
+
+    cron_path = get_default_state_path("cronjobs.json")
+    assert cron_path == DEFAULT_CRONJOBS_PATH
+    assert os.path.isabs(cron_path)
+    assert cron_path.endswith(os.path.join(".faf_agent", "data", "cronjobs.json"))
+
+    # 2. validate_cron_state_path accepts default paths
+    ok, _, p = validate_cron_state_path(DEFAULT_REMINDERS_PATH)
+    assert ok is True
+    assert p == pathlib.Path(DEFAULT_REMINDERS_PATH).resolve()
+
+    ok, _, p = validate_cron_state_path(DEFAULT_CRONJOBS_PATH)
+    assert ok is True
+    assert p == pathlib.Path(DEFAULT_CRONJOBS_PATH).resolve()
+
+    # 3. ReminderStore defaults to DEFAULT_REMINDERS_PATH
+    r_store = ReminderStore()
+    assert r_store.file_path == str(pathlib.Path(DEFAULT_REMINDERS_PATH).resolve())
+
+    # 4. CronJobStore defaults to DEFAULT_CRONJOBS_PATH
+    c_store = CronJobStore()
+    assert c_store.file_path == str(pathlib.Path(DEFAULT_CRONJOBS_PATH).resolve())
+
+    # 5. Security violation: stores reject sensitive credentials and protected paths
+    with pytest.raises(ValueError, match="kredensial|Invalid reminder store path"):
+        ReminderStore(file_path="/sdcard/.env")
+
+    with pytest.raises(ValueError, match="kredensial|Invalid cronjob store path"):
+        CronJobStore(file_path="/sdcard/.env")
+
+    with pytest.raises(ValueError, match="dilindungi|Invalid reminder store path"):
+        ReminderStore(file_path="/system")
+
+    with pytest.raises(ValueError, match="dilindungi|Invalid cronjob store path"):
+        CronJobStore(file_path="/system")

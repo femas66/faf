@@ -155,6 +155,7 @@ class AgentResponse:
     text: str
     media_files: list[dict[str, str]] = field(default_factory=list)
     interrupted: bool = False
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 class FafAgent:
@@ -281,6 +282,11 @@ class FafAgent:
         step = 0
         consecutive_identical_errors = 0
         last_tool_sig: tuple[str, str, str] | None = None
+        total_usage: dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
 
         try:
             while step < max_steps:
@@ -295,6 +301,17 @@ class FafAgent:
                     messages=history,
                     tools=tools_schema,
                 )
+
+                if response.usage:
+                    total_usage["prompt_tokens"] += response.usage.get("prompt_tokens", 0)
+                    total_usage["completion_tokens"] += response.usage.get("completion_tokens", 0)
+                    total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
+                    logger.info(
+                        f"Step {step} token usage: prompt={response.usage.get('prompt_tokens', 0)}, "
+                        f"completion={response.usage.get('completion_tokens', 0)}, "
+                        f"total={response.usage.get('total_tokens', 0)} "
+                        f"(accumulated={total_usage['total_tokens']})"
+                    )
 
                 choice = response.choices[0]
                 message = choice.message
@@ -328,7 +345,7 @@ class FafAgent:
                         history = self._trim_history(history)
                         self._conversations[chat_id] = history
 
-                    return AgentResponse(text=final_text, media_files=media_files)
+                    return AgentResponse(text=final_text, media_files=media_files, usage=total_usage)
 
                 # Process all tool calls sequentially
                 for tc in message.tool_calls:
@@ -374,7 +391,7 @@ class FafAgent:
                         if len(history) > self.max_history + 1:
                             history = self._trim_history(history)
                             self._conversations[chat_id] = history
-                        return AgentResponse(text=final_text, media_files=media_files)
+                        return AgentResponse(text=final_text, media_files=media_files, usage=total_usage)
 
                     # Execute tool via registry
                     tool_result: ToolResult = await self.registry.execute(
@@ -432,19 +449,31 @@ class FafAgent:
                     messages=history,
                     tools=None,
                 )
+                if final_resp.usage:
+                    total_usage["prompt_tokens"] += final_resp.usage.get("prompt_tokens", 0)
+                    total_usage["completion_tokens"] += final_resp.usage.get("completion_tokens", 0)
+                    total_usage["total_tokens"] += final_resp.usage.get("total_tokens", 0)
+                    logger.info(
+                        f"Synthesis token usage: prompt={final_resp.usage.get('prompt_tokens', 0)}, "
+                        f"completion={final_resp.usage.get('completion_tokens', 0)}, "
+                        f"total={final_resp.usage.get('total_tokens', 0)} "
+                        f"(accumulated={total_usage['total_tokens']})"
+                    )
+
                 final_content = final_resp.choices[0].message.content or ""
                 final_text = clean_plain_chat_text(final_content)
                 if final_text:
                     if len(history) > self.max_history + 1:
                         history = self._trim_history(history)
                         self._conversations[chat_id] = history
-                    return AgentResponse(text=final_text, media_files=media_files)
+                    return AgentResponse(text=final_text, media_files=media_files, usage=total_usage)
             except Exception as e:
                 logger.warning(f"Failed to generate final human synthesis: {e}")
 
             return AgentResponse(
                 text="Maaf, saya belum dapat menyelesaikan permintaan ini karena menemui kendala teknis berulang. Silakan periksa kembali detail perintah atau coba beberapa saat lagi.",
                 media_files=media_files,
+                usage=total_usage,
             )
 
         except asyncio.CancelledError:
@@ -453,12 +482,19 @@ class FafAgent:
             return AgentResponse(
                 text="⎿ Interrupted · What should faf-agent do instead?",
                 interrupted=True,
+                usage=total_usage,
             )
         except Exception as e:
             logger.exception(f"Error in agent loop: {e}")
             return AgentResponse(
-                text=f"Terjadi kesalahan saat memproses permintaan: {str(e)}"
+                text=f"Terjadi kesalahan saat memproses permintaan: {str(e)}",
+                usage=total_usage,
             )
+
+    async def close(self) -> None:
+        """Cleanly close agent resources, subprocesses, and AIClient connection pool."""
+        await self.ai_client.close()
+        await bridge.cancel_all_subprocesses()
 
 
 # Global singleton agent

@@ -11,6 +11,7 @@ import httpx
 
 from src.core.android_bridge import bridge
 from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.reminder_mgr import _format_readable_dt
 
 logger = logging.getLogger("faf_agent.tools.weather_mgr")
 
@@ -79,12 +80,6 @@ def _get_wmo_info(code: int) -> dict[str, Any]:
     return WMO_WEATHER_CODES.get(
         code, {"label": f"Kondisi Khusus (Kode {code})", "emoji": "🌡️", "is_rain": False, "rain_risk": "Sedang"}
     )
-
-
-def _format_readable_dt(dt: datetime.datetime) -> str:
-    nama_hari = HARI_INDONESIA[dt.weekday()]
-    nama_bulan = BULAN_INDONESIA[dt.month]
-    return f"{nama_hari}, {dt.day:02d} {nama_bulan} {dt.year} {dt.strftime('%H:%M')}"
 
 
 def _wind_direction_label(deg: float) -> str:

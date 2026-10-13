@@ -37,6 +37,7 @@ from src.bot.handlers.commands import (
 from src.bot.handlers.chat import handle_chat_message
 from src.tools.reminder_mgr import _default_worker
 from src.tools.cronjob_mgr import _default_cron_worker
+from src.core.agent import agent
 
 logger = logging.getLogger("faf_agent")
 
@@ -115,7 +116,8 @@ def create_application() -> Application:
     async def on_shutdown(application: Application) -> None:
         _default_worker.stop()
         _default_cron_worker.stop()
-        logger.info("Reminder and CronJob background workers stopped.")
+        await agent.close()
+        logger.info("Reminder, CronJob workers, and Agent AIClient connection pool stopped.")
 
     app = (
         ApplicationBuilder()

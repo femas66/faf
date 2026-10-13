@@ -165,7 +165,7 @@ def _normalize_search_query(q: str) -> str:
     return " ".join(filtered) if filtered else cleaned.strip()
 
 
-def _check_url_safety(url: str) -> tuple[bool, str, dict[str, Any]]:
+def _check_url_safety(url: str, check_dangerous_extensions: bool = True) -> tuple[bool, str, dict[str, Any]]:
     """
     Validasi keamanan URL tingkat tinggi (mencegah SSRF, private network bypass, port scanning,
     skema berbahaya, dan ekstensi file malware).
@@ -244,12 +244,13 @@ def _check_url_safety(url: str) -> tuple[bool, str, dict[str, Any]]:
             pass
 
     # Cek ekstensi file berbahaya
-    path_lower = parsed.path.lower()
-    for ext in _DANGEROUS_EXTENSIONS:
-        if path_lower.endswith(ext):
-            return False, f"URL mengarah ke file eksekusi berbahaya '{ext}' (tidak aman).", {
-                "url": raw, "extension": ext,
-            }
+    if check_dangerous_extensions:
+        path_lower = parsed.path.lower()
+        for ext in _DANGEROUS_EXTENSIONS:
+            if path_lower.endswith(ext):
+                return False, f"URL mengarah ke file eksekusi berbahaya '{ext}' (tidak aman).", {
+                    "url": raw, "extension": ext,
+                }
 
     return True, "URL aman untuk diakses.", {
         "url": raw,

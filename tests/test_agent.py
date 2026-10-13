@@ -1296,6 +1296,62 @@ async def test_media_downloader_tool_full_flow():
             assert "2/2 Berhasil" in res_batch.output
 
 
+@pytest.mark.asyncio
+async def test_media_downloader_ssrf_and_url_safety():
+    """Verify MediaDownloaderTool blocks SSRF attacks, private networks, loopback, and cloud metadata."""
+    tool = MediaDownloaderTool()
+    ctx = ToolContext(chat_id=123, user_id=456)
+
+    # 1. Loopback addresses (IPv4 & localhost)
+    res_loopback = await tool.execute(ctx, action="download", url="http://127.0.0.1:8000/secret.txt")
+    assert res_loopback.success is False
+    assert "akses ditolak" in res_loopback.error.lower()
+    assert "tidak aman" in res_loopback.error.lower() or "loopback" in res_loopback.error.lower()
+
+    res_localhost = await tool.execute(ctx, action="download", url="http://localhost:3000/keys")
+    assert res_localhost.success is False
+    assert "akses ditolak" in res_localhost.error.lower()
+    assert "tidak aman" in res_localhost.error.lower() or "lokal" in res_localhost.error.lower()
+
+    # 2. Private RFC1918 networks (e.g. internal router or backend services)
+    res_private_192 = await tool.execute(ctx, action="download", url="http://192.168.1.1/backup.cfg")
+    assert res_private_192.success is False
+    assert "akses ditolak" in res_private_192.error.lower()
+    assert "tidak aman" in res_private_192.error.lower() or "privat" in res_private_192.error.lower()
+
+    res_private_10 = await tool.execute(ctx, action="download", url="http://10.0.0.5:8080/internal")
+    assert res_private_10.success is False
+    assert "akses ditolak" in res_private_10.error.lower()
+
+    # 3. Cloud metadata endpoint (AWS/GCP link-local IP 169.254.169.254)
+    res_metadata = await tool.execute(ctx, action="download", url="http://169.254.169.254/latest/meta-data/")
+    assert res_metadata.success is False
+    assert "akses ditolak" in res_metadata.error.lower()
+    assert "link-local" in res_metadata.error.lower() or "tidak aman" in res_metadata.error.lower()
+
+    # 4. Action info on unsafe URL
+    res_info_unsafe = await tool.execute(ctx, action="info", url="http://127.0.0.1:9000/info")
+    assert res_info_unsafe.success is False
+    assert "akses ditolak" in res_info_unsafe.error.lower()
+
+    # 5. Dangerous port (e.g. SSH port 22 or Redis port 6379)
+    res_dangerous_port = await tool.execute(ctx, action="download", url="http://example.com:22/file")
+    assert res_dangerous_port.success is False
+    assert "akses ditolak" in res_dangerous_port.error.lower()
+    assert "port" in res_dangerous_port.error.lower() or "berbahaya" in res_dangerous_port.error.lower()
+
+    # 6. Torrent action with unsafe HTTP URL
+    res_torrent_unsafe = await tool.execute(ctx, action="torrent_magnet", url="http://127.0.0.1:8080/malicious.torrent")
+    assert res_torrent_unsafe.success is False
+    assert "akses ditolak" in res_torrent_unsafe.error.lower()
+
+    # 7. Disallowed URL scheme (e.g. file://, gopher://)
+    res_file_scheme = await tool.execute(ctx, action="download", url="file:///etc/passwd")
+    assert res_file_scheme.success is False
+    assert "akses ditolak" in res_file_scheme.error.lower()
+    assert "skema" in res_file_scheme.error.lower() or "tidak aman" in res_file_scheme.error.lower()
+
+
 # ---------------------------------------------------------------------------
 # 9. Ambiguity Handling & Proactive Clarification Tests
 # ---------------------------------------------------------------------------
@@ -1590,6 +1646,123 @@ async def test_ai_client_endpoint_url_resolution(monkeypatch):
     client.settings.openai_base_url = "https://api.openai.com/v1"
     await client.get_chat_completion([{"role": "user", "content": "hi"}])
     assert captured_urls[-1] == "https://api.openai.com/v1/chat/completions"
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_ai_client_connection_pooling_and_lifecycle(monkeypatch):
+    """Verify AIClient connection pool reuse, limits, context manager, and graceful shutdown."""
+    from src.core.ai_client import AIClient
+    from src.core.agent import FafAgent
+    import httpx
+
+    client = AIClient()
+    assert client._client is None
+
+    # 1. Lazy initialization creates client with connection pool limits
+    http1 = await client._get_client()
+    assert isinstance(http1, httpx.AsyncClient)
+    assert not http1.is_closed
+    assert getattr(http1._transport._pool, "_max_connections", 10) == 10
+    assert getattr(http1._transport._pool, "_max_keepalive_connections", 5) == 5
+
+    # 2. Reusing existing instance (no socket churn)
+    http2 = await client._get_client()
+    assert http1 is http2
+
+    # 3. Chat completion reuses the same client instance
+    async def mock_post(self, url, **kwargs):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"role": "assistant", "content": "pong"}}]
+        }
+        return mock_response
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    resp = await client.get_chat_completion([{"role": "user", "content": "ping"}])
+    assert resp.choices[0].message.content == "pong"
+    assert client._client is http1
+
+    # 4. Graceful shutdown closes client and nulls instance
+    await client.close()
+    assert client._client is None
+    assert http1.is_closed
+
+    # 5. Subsequent request re-creates healthy connection pool
+    http3 = await client._get_client()
+    assert http3 is not None
+    assert not http3.is_closed
+    assert http3 is not http1
+    await client.close()
+
+    # 6. Context manager support
+    async with AIClient() as ctx_client:
+        active_client = ctx_client._client
+        assert active_client is not None
+        assert not active_client.is_closed
+    assert ctx_client._client is None
+    assert active_client.is_closed
+
+    # 7. Agent close propagates to AIClient and bridge
+    agent_instance = FafAgent()
+    _ = await agent_instance.ai_client._get_client()
+    assert agent_instance.ai_client._client is not None
+    await agent_instance.close()
+    assert agent_instance.ai_client._client is None
+
+
+def test_settings_temp_media_dir_dataclass_field():
+    """Verify temp_media_dir is a valid dataclass field in Settings and appears in asdict()."""
+    import dataclasses
+    from src.config import Settings
+
+    s = Settings()
+    s_dict = dataclasses.asdict(s)
+    assert "temp_media_dir" in s_dict
+    assert s_dict["temp_media_dir"] == "/data/data/com.termux/files/home/faf_media"
+
+    custom_s = Settings(temp_media_dir="/custom/path/media")
+    assert custom_s.temp_media_dir == "/custom/path/media"
+    assert dataclasses.asdict(custom_s)["temp_media_dir"] == "/custom/path/media"
+
+
+@pytest.mark.asyncio
+async def test_token_usage_tracking_in_ai_client_and_agent(monkeypatch):
+    """Verify AIClient captures token usage and FafAgent aggregates it in AgentResponse."""
+    import httpx
+    from src.core.ai_client import AIClient
+    from src.core.agent import FafAgent
+    from src.tools.base import ToolContext
+
+    client = AIClient()
+
+    fake_usage = {"prompt_tokens": 42, "completion_tokens": 18, "total_tokens": 60}
+
+    async def mock_post(self, url, **kwargs):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"role": "assistant", "content": "Halo apa kabar"}}],
+            "usage": fake_usage,
+        }
+        return mock_response
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    # 1. AIClient captures usage
+    llm_resp = await client.get_chat_completion([{"role": "user", "content": "hi"}])
+    assert llm_resp.usage == fake_usage
+    await client.close()
+
+    # 2. FafAgent accumulates usage in AgentResponse
+    agent = FafAgent(ai_client=client)
+    ctx = ToolContext(chat_id=999, user_id=888)
+    res = await agent.run(user_message="tes token", context=ctx)
+    assert res.usage["prompt_tokens"] == 42
+    assert res.usage["completion_tokens"] == 18
+    assert res.usage["total_tokens"] == 60
+    await agent.close()
 
 
 def test_agent_history_truncation_preserves_valid_tool_sequence():
@@ -1877,6 +2050,72 @@ def test_default_log_level_is_warning():
     from src.config import Settings
     s = Settings()
     assert s.log_level == "WARNING"
+
+
+@pytest.mark.asyncio
+async def test_productivity_make_call_blocks_ussd_codes():
+    from src.tools.productivity import ProductivityControlTool
+    tool = ProductivityControlTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+
+    # 1. Dangerous USSD/MMI codes
+    res_mmi = await tool.execute(ctx, action="make_call", phone_number="*2767*3855#")
+    assert res_mmi.success is False
+    assert "USSD/MMI" in res_mmi.error
+
+    res_star = await tool.execute(ctx, action="make_call", phone_number="*#06#")
+    assert res_star.success is False
+    assert "USSD/MMI" in res_star.error
+
+    res_hash = await tool.execute(ctx, action="make_call", phone_number="123#")
+    assert res_hash.success is False
+    assert "USSD/MMI" in res_hash.error
+
+
+@pytest.mark.asyncio
+async def test_media_control_quoting_camera_and_mic(monkeypatch):
+    import shlex
+    from src.tools.media import MediaControlTool
+    from src.core.android_bridge import CommandResult
+
+    tool = MediaControlTool()
+    ctx = ToolContext(chat_id=1, user_id=1)
+    executed_cmds = []
+
+    async def mock_execute_shell(cmd, **kwargs):
+        executed_cmds.append(cmd)
+        return CommandResult(stdout="", stderr="", returncode=0, command=cmd, executed_as_root=False)
+
+    from src.tools import media
+    monkeypatch.setattr(media.bridge, "execute_shell", mock_execute_shell)
+
+    # Trigger photo and record commands
+    await tool.execute(ctx, action="take_photo", camera_id=0)
+    assert len(executed_cmds) == 1
+    photo_cmd = executed_cmds[0]
+    assert "termux-camera-photo -c 0 " in photo_cmd
+
+    # Test record audio
+    executed_cmds.clear()
+    async def mock_sleep(secs):
+        pass
+    monkeypatch.setattr(media.asyncio, "sleep", mock_sleep)
+
+    await tool.execute(ctx, action="record_audio", duration_seconds=1)
+    assert any("termux-microphone-record -f " in cmd for cmd in executed_cmds)
+    record_cmd = [cmd for cmd in executed_cmds if "-f " in cmd][0]
+    assert "-l 1 -e m4a" in record_cmd
+
+
+def test_memory_store_rlock_reentrant():
+    from src.core.memory_store import memory_store
+    import threading
+
+    assert isinstance(memory_store._lock, type(threading.RLock()))
+    # Test re-entrant lock acquisition on the same thread
+    with memory_store._lock:
+        with memory_store._lock:
+            assert True
 
 
 

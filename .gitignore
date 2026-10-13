@@ -57,6 +57,5 @@ data/
 *.sqlite
 *.sqlite3
 *.lock
-audit_report.md
 docs/
 

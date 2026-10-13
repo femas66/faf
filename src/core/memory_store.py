@@ -56,7 +56,7 @@ class MemoryStore:
         self.settings = get_settings()
         self._target_path = db_path or self.settings.memory_db_path
         self._actual_path: str | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._init_db()
 
     def _resolve_db_path(self) -> str:

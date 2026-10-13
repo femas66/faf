@@ -40,6 +40,7 @@ class LLMChoice:
 @dataclass
 class LLMResponse:
     choices: list[LLMChoice]
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 class AIClient:
@@ -47,6 +48,31 @@ class AIClient:
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or lazily initialize persistent httpx.AsyncClient with connection pooling."""
+        if self._client is None or self._client.is_closed:
+            limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+            self._client = httpx.AsyncClient(timeout=60.0, limits=limits)
+        return self._client
+
+    async def close(self) -> None:
+        """Close persistent HTTP connection pool and client."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
+    async def aclose(self) -> None:
+        """Alias for close()."""
+        await self.close()
+
+    async def __aenter__(self) -> AIClient:
+        await self._get_client()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
 
     async def get_chat_completion(
         self,
@@ -78,8 +104,8 @@ class AIClient:
             payload["tool_choice"] = tool_choice
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                res = await client.post(url, headers=headers, json=payload)
+            client = await self._get_client()
+            res = await client.post(url, headers=headers, json=payload)
 
             if res.status_code == 401:
                 raise RuntimeError(
@@ -119,7 +145,12 @@ class AIClient:
                 content=content,
                 tool_calls=parsed_tool_calls,
             )
-            return LLMResponse(choices=[LLMChoice(message=msg_obj)])
+
+            raw_usage = data.get("usage", {})
+            if not isinstance(raw_usage, dict):
+                raw_usage = {}
+
+            return LLMResponse(choices=[LLMChoice(message=msg_obj)], usage=raw_usage)
 
         except httpx.ConnectError as e:
             logger.error(f"Cannot connect to LLM endpoint: {e}")

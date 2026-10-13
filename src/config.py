@@ -39,6 +39,7 @@ class Settings:
     command_timeout: int = 30
     log_level: str = "WARNING"
     notes_storage_dir: str = "/sdcard/Notes"
+    temp_media_dir: str = "/data/data/com.termux/files/home/faf_media"
     memory_db_path: str = "/data/data/com.termux/files/home/faf_memory.db"
     agent_max_steps: int = 15
 

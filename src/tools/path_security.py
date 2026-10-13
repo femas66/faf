@@ -273,19 +273,31 @@ def validate_skill_path(
     return True, "Skill path aman.", resolved
 
 
+DEFAULT_DATA_DIR: str = os.path.expanduser("~/.faf_agent/data")
+
+
+def get_default_data_dir() -> pathlib.Path:
+    """Return absolute path for persistent state storage (~/.faf_agent/data)."""
+    data_dir = pathlib.Path(DEFAULT_DATA_DIR)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def get_default_state_path(filename: str) -> str:
+    """Return absolute path for a persistent state file in DEFAULT_DATA_DIR."""
+    return str(get_default_data_dir() / filename)
+
+
 def validate_cron_state_path(
     state_path: str | pathlib.Path | os.PathLike,
     default_storage_dir: str | pathlib.Path | os.PathLike | None = None,
 ) -> tuple[bool, str, pathlib.Path | None]:
-    """Validate cron state and persistence file paths.
+    """Validate cron and reminder state persistence file paths.
 
-    Ensures cron state paths do not overwrite system files, credentials,
-    or escape intended storage locations.
+    Ensures state paths do not overwrite system files, credentials,
+    or escape intended storage locations. If default_storage_dir is provided,
+    strictly confines state_path within that directory.
     """
-    if default_storage_dir is None:
-        settings = get_settings()
-        default_storage_dir = settings.temp_media_dir or "/tmp"
-
     ok, msg, resolved = validate_path(
         path=state_path,
         base_dir=default_storage_dir,

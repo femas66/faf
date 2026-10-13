@@ -17,6 +17,7 @@ from typing import Any
 from src.config import get_settings
 from src.core.android_bridge import bridge
 from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.web_search import _check_url_safety
 
 logger = logging.getLogger("faf_agent.tools.media_downloader")
 
@@ -243,6 +244,9 @@ class MediaDownloaderTool(BaseTool):
             url = kwargs.get("url", "").strip()
             if not url:
                 return ToolResult(success=False, output="", error="Parameter 'url' wajib disertakan untuk aksi 'info'.")
+            is_safe, safety_msg, _ = _check_url_safety(url, check_dangerous_extensions=False)
+            if not is_safe:
+                return ToolResult(success=False, output="", error=f"Akses ditolak: {safety_msg}")
             return await self._action_info(url, context)
 
         # -------------------------------------------------------------------
@@ -252,6 +256,10 @@ class MediaDownloaderTool(BaseTool):
             url = kwargs.get("url", "").strip()
             if not url:
                 return ToolResult(success=False, output="", error="Parameter 'url' (Magnet URI atau file .torrent) wajib disertakan.")
+            if url.lower().startswith(("http://", "https://")):
+                is_safe, safety_msg, _ = _check_url_safety(url, check_dangerous_extensions=False)
+                if not is_safe:
+                    return ToolResult(success=False, output="", error=f"Akses ditolak: {safety_msg}")
             return await self._action_torrent(url, context, kwargs)
 
         # -------------------------------------------------------------------
@@ -342,6 +350,10 @@ class MediaDownloaderTool(BaseTool):
 
     async def _action_info(self, url: str, context: ToolContext) -> ToolResult:
         """Inspect media or direct file metadata without downloading."""
+        is_safe, safety_msg, _ = _check_url_safety(url, check_dangerous_extensions=False)
+        if not is_safe:
+            return ToolResult(success=False, output="", error=f"Akses ditolak: {safety_msg}")
+
         if context.on_status_update:
             await context.on_status_update(f"● media_downloader · memeriksa info {url[:40]}...")
 
@@ -508,6 +520,15 @@ class MediaDownloaderTool(BaseTool):
         raw_url = kwargs.get("url", "").strip()
         if not raw_url:
             return ToolResult(success=False, output="", error="Parameter 'url' wajib disertakan.")
+
+        # Proteksi SSRF & Validasi Keamanan URL
+        is_safe, safety_msg, _ = _check_url_safety(raw_url, check_dangerous_extensions=False)
+        if not is_safe:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Akses ditolak: {safety_msg}",
+            )
 
         output_dir = _resolve_download_dir(kwargs.get("output_dir"))
         timeout = min(600, max(15, kwargs.get("timeout_seconds", 180)))
