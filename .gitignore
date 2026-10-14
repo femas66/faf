@@ -57,5 +57,4 @@ data/
 *.sqlite
 *.sqlite3
 *.lock
-docs/
 

@@ -274,6 +274,7 @@ def validate_skill_path(
 
 
 DEFAULT_DATA_DIR: str = os.path.expanduser("~/.faf_agent/data")
+DEFAULT_DOCUMENTS_DIR: str = os.path.expanduser("~/.faf_agent/documents")
 
 
 def get_default_data_dir() -> pathlib.Path:
@@ -283,9 +284,37 @@ def get_default_data_dir() -> pathlib.Path:
     return data_dir
 
 
+def get_default_documents_dir() -> pathlib.Path:
+    """Return absolute path for persistent user documents (~/.faf_agent/documents)."""
+    docs_dir = pathlib.Path(DEFAULT_DOCUMENTS_DIR)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    return docs_dir
+
+
 def get_default_state_path(filename: str) -> str:
     """Return absolute path for a persistent state file in DEFAULT_DATA_DIR."""
     return str(get_default_data_dir() / filename)
+
+
+def validate_document_path(
+    doc_path: str | pathlib.Path | os.PathLike,
+    default_storage_dir: str | pathlib.Path | os.PathLike | None = None,
+) -> tuple[bool, str, pathlib.Path | None]:
+    """Validate document file paths (PDF, docs).
+
+    Ensures document paths do not access system files or sensitive credentials.
+    If default_storage_dir is provided, confines doc_path within that directory.
+    """
+    ok, msg, resolved = validate_path(
+        path=doc_path,
+        base_dir=default_storage_dir,
+        check_credentials=True,
+        check_protected=True,
+    )
+    if not ok:
+        return False, f"Document Path Invalid: {msg}", None
+
+    return True, "Document path aman.", resolved
 
 
 def validate_cron_state_path(

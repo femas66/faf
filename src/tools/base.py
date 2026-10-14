@@ -14,6 +14,7 @@ class ToolContext:
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     on_status_update: Callable[[str], Awaitable[None]] | None = None
     on_request_confirmation: Callable[[str, str], Awaitable[bool]] | None = None
+    on_token: Callable[[str], Awaitable[None]] | None = None
 
 
 @dataclass

@@ -33,6 +33,7 @@ from src.bot.handlers.commands import (
     handle_clear,
     handle_callback_query,
     handle_doctor,
+    handle_mode,
 )
 from src.bot.handlers.chat import handle_chat_message
 from src.tools.reminder_mgr import _default_worker
@@ -149,12 +150,14 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("clear", handle_clear, block=False))
     app.add_handler(CommandHandler("doctor", handle_doctor, block=False))
     app.add_handler(CommandHandler("check", handle_doctor, block=False))
+    app.add_handler(CommandHandler("mode", handle_mode, block=False))
+    app.add_handler(CommandHandler("model", handle_mode, block=False))
 
     # Register Callback Query Handler (Inline buttons)
     app.add_handler(CallbackQueryHandler(handle_callback_query, block=False))
 
-    # Register Natural Language Chat Handler
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_chat_message, block=False))
+    # Register Natural Language Chat & Document Handler
+    app.add_handler(MessageHandler((filters.TEXT | filters.Document.ALL) & (~filters.COMMAND), handle_chat_message, block=False))
 
     return app
 

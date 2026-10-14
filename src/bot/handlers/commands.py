@@ -4,6 +4,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.config import get_settings
 from src.core.android_bridge import bridge
 from src.core.permissions import permission_manager
 from src.core.agent import agent, clean_plain_chat_text
@@ -309,3 +310,50 @@ async def handle_doctor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if len(report) > 4000:
         report = report[:3950] + "\n...(dipotong karena batas pesan)"
     await status_msg.edit_text(report)
+
+
+@authorized_only
+async def handle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /mode or /model: switch between auto, fast, and smart models."""
+    if not update.effective_message or not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    settings = get_settings()
+
+    args = context.args or []
+    if not args:
+        current_mode = agent.get_mode(chat_id)
+        msg = (
+            f"Mode Model Saat Ini: {current_mode.upper()}\n"
+            f"• Model Fast: {settings.openai_fast_model}\n"
+            f"• Model Smart: {settings.openai_smart_model}\n\n"
+            "Gunakan perintah:\n"
+            "• /mode auto - Pemilihan otomatis sesuai kompleksitas tugas (default)\n"
+            "• /mode fast - Gunakan model cepat dan hemat token untuk semua pesan\n"
+            "• /mode smart - Gunakan model cerdas dengan reasoning tinggi untuk semua pesan"
+        )
+        await update.effective_message.reply_text(msg)
+        return
+
+    choice = args[0].lower().strip()
+    if choice in ("fast", "cepat"):
+        agent.set_mode(chat_id, "fast")
+        await update.effective_message.reply_text(
+            f"Mode model diubah ke FAST ({settings.openai_fast_model}). Respon akan lebih cepat dan hemat token."
+        )
+    elif choice in ("smart", "pintar"):
+        agent.set_mode(chat_id, "smart")
+        await update.effective_message.reply_text(
+            f"Mode model diubah ke SMART ({settings.openai_smart_model}). Kemampuan reasoning dan analisis maksimal aktif."
+        )
+    elif choice in ("auto", "otomatis"):
+        agent.set_mode(chat_id, "auto")
+        await update.effective_message.reply_text(
+            "Mode model diubah ke AUTO. Agen otomatis memilih model cepat atau cerdas sesuai kompleksitas tugas."
+        )
+    else:
+        await update.effective_message.reply_text(
+            "Pilihan tidak valid. Gunakan /mode auto, /mode fast, atau /mode smart."
+        )
+

@@ -21,6 +21,9 @@ from src.tools.path_security import (
     DEFAULT_DATA_DIR,
     get_default_data_dir,
     get_default_state_path,
+    DEFAULT_DOCUMENTS_DIR,
+    get_default_documents_dir,
+    validate_document_path,
 )
 
 __all__ = [
@@ -42,4 +45,7 @@ __all__ = [
     "DEFAULT_DATA_DIR",
     "get_default_data_dir",
     "get_default_state_path",
+    "DEFAULT_DOCUMENTS_DIR",
+    "get_default_documents_dir",
+    "validate_document_path",
 ]

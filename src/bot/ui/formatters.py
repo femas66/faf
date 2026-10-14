@@ -62,6 +62,7 @@ def format_help_message() -> str:
         "• /cancel - Batalkan tugas AI yang sedang berjalan\n"
         "• /clear - Bersihkan riwayat percakapan sesi AI saat ini\n"
         "• /doctor atau /check - Periksa status kelengkapan instalasi semua tools di Termux\n"
+        "• /mode [auto|fast|smart] - Pilih mode model AI (kecepatan vs kecerdasan)\n"
         "• /help - Tampilkan panduan ini\n\n"
         "Perintah Bahasa Alami (Chat Langsung):\n"
         "• Ingatkan saya jam 12 untuk memberi makan kucing (kirim pesan Telegram)\n"

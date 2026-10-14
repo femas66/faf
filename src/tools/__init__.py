@@ -20,6 +20,7 @@ from src.tools.python_repl import PythonReplTool
 from src.tools.clarification import ClarificationTool
 from src.tools.cronjob_mgr import CronJobTool
 from src.tools.weather_mgr import WeatherForecastTool
+from src.tools.pdf_mgr import PDFManagerTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -34,6 +35,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(ProcessManagerTool())
     registry.register(TimeManagerTool())
     registry.register(FileManagerTool())
+    registry.register(PDFManagerTool())
     registry.register(DeviceInteractionTool())
     registry.register(ReminderManagerTool())
     registry.register(CronJobTool())
@@ -64,6 +66,7 @@ __all__ = [
     "ProcessManagerTool",
     "TimeManagerTool",
     "FileManagerTool",
+    "PDFManagerTool",
     "DeviceInteractionTool",
     "ReminderManagerTool",
     "CronJobTool",

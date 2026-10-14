@@ -46,8 +46,8 @@ class LLMResponse:
 class AIClient:
     """Pure-Python OpenAI-compatible client using httpx (zero Rust/maturin dependencies)."""
 
-    def __init__(self) -> None:
-        self.settings = get_settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -80,6 +80,7 @@ class AIClient:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] = "auto",
         temperature: float = 0.2,
+        model: str | None = None,
     ) -> LLMResponse:
         """Call LLM completion endpoint with OpenAI tool calling protocol."""
         base_url = self.settings.openai_base_url.rstrip("/")
@@ -94,7 +95,7 @@ class AIClient:
         }
 
         payload: dict[str, Any] = {
-            "model": self.settings.openai_model,
+            "model": model or self.settings.openai_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -160,4 +161,76 @@ class AIClient:
             raise RuntimeError(f"Permintaan ke LLM melebihi batas waktu (timeout): {e}")
         except Exception as e:
             logger.exception(f"Unexpected error calling LLM: {e}")
+            raise
+
+    async def stream_chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] = "auto",
+        temperature: float = 0.2,
+        model: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream chat completion tokens via SSE from OpenAI-compatible endpoint."""
+        base_url = self.settings.openai_base_url.rstrip("/")
+        if not base_url.endswith("/v1"):
+            url = f"{base_url}/v1/chat/completions"
+        else:
+            url = f"{base_url}/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.settings.openai_api_key or 'no-key'}",
+        }
+
+        payload: dict[str, Any] = {
+            "model": model or self.settings.openai_model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        if tools and len(tools) > 0:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+
+        try:
+            client = await self._get_client()
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if response.status_code == 401:
+                    raise RuntimeError(
+                        f"Autentikasi LLM gagal (401 Unauthorized). Periksa OPENAI_API_KEY di .env: {response.status_code}"
+                    )
+                elif response.status_code != 200:
+                    err_body = await response.aread()
+                    raise RuntimeError(
+                        f"LLM API Streaming Error ({response.status_code}): {err_body.decode(errors='replace')}"
+                    )
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            content = delta.get("content")
+                            if content:
+                                yield content
+                    except json.JSONDecodeError:
+                        continue
+
+        except httpx.ConnectError as e:
+            logger.error(f"Cannot connect to LLM endpoint for streaming: {e}")
+            raise RuntimeError(f"Gagal terhubung ke endpoint LLM ({url}): {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"LLM streaming request timed out: {e}")
+            raise RuntimeError(f"Permintaan streaming LLM melebihi batas waktu (timeout): {e}")
+        except Exception as e:
+            logger.exception(f"Unexpected error in LLM streaming: {e}")
             raise

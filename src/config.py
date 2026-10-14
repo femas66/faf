@@ -32,6 +32,8 @@ class Settings:
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o"
+    openai_fast_model: str = "gpt-4o-mini"
+    openai_smart_model: str = "gpt-4o"
 
     # Security & System Settings
     security_confirmation_timeout: int = 60
@@ -68,6 +70,12 @@ class Settings:
             get_val("openai_base_url", "https://api.openai.com/v1") or "https://api.openai.com/v1"
         )
         self.openai_model = str(get_val("openai_model", "gpt-4o") or "gpt-4o")
+        self.openai_fast_model = str(
+            get_val("openai_fast_model", "gpt-4o-mini") or "gpt-4o-mini"
+        )
+        self.openai_smart_model = str(
+            get_val("openai_smart_model", self.openai_model) or self.openai_model
+        )
 
         self.security_confirmation_timeout = int(
             get_val("security_confirmation_timeout", 60)

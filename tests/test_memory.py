@@ -508,3 +508,39 @@ def test_memory_store_connection_cleanup(tmp_path, monkeypatch):
     assert len(closed_connections) >= 2, f"Expected closed connections >= 2, got {len(closed_connections)}"
 
 
+def test_memory_store_prompt_caching(temp_memory_store, monkeypatch):
+    store = temp_memory_store
+    store.store_fact(key="user_name", content="Alice", category="user_profile")
+
+    call_count = 0
+    original_list = store.list_all_facts
+
+    def spy_list_all_facts(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(store, "list_all_facts", spy_list_all_facts)
+
+    # First call: hits DB/method
+    res1 = store.format_for_system_prompt()
+    assert "Alice" in res1
+    assert call_count == 1
+
+    # Second call: served from in-memory cache, no new DB call
+    res2 = store.format_for_system_prompt()
+    assert res1 == res2
+    assert call_count == 1
+
+    # Mutating fact invalidates cache
+    store.store_fact(key="user_name", content="Bob", category="user_profile")
+    res3 = store.format_for_system_prompt()
+    assert "Bob" in res3
+    assert call_count == 2
+
+    # Another call: cached again
+    res4 = store.format_for_system_prompt()
+    assert res3 == res4
+    assert call_count == 2
+
+

@@ -37,20 +37,35 @@ class AndroidBridge:
         self.settings = get_settings()
         self._active_processes: set[asyncio.subprocess.Process] = set()
         self._lock = asyncio.Lock()
+        self._root_available_cached: bool | None = None
+        self._is_termux_cached: bool | None = None
+        self._props_cache: dict[str, str] = {}
+
+    def clear_cache(self) -> None:
+        """Clear cached hardware properties and root status."""
+        self._root_available_cached = None
+        self._is_termux_cached = None
+        self._props_cache.clear()
 
     @property
     def is_android_termux(self) -> bool:
         """Check whether current runtime is within an Android Termux environment."""
-        return (
+        if self._is_termux_cached is not None:
+            return self._is_termux_cached
+        self._is_termux_cached = (
             "com.termux" in os.environ.get("PREFIX", "")
             or os.path.exists("/data/data/com.termux")
             or os.path.exists("/data/data/com.termux/files/usr/bin/termux-info")
         )
+        return self._is_termux_cached
 
     def is_root_available(self) -> bool:
         """Check if `su` binary exists on PATH or standard Android root locations."""
         if not self.settings.enable_root_commands:
             return False
+
+        if self._root_available_cached is not None:
+            return self._root_available_cached
 
         su_paths = [
             "/system/bin/su",
@@ -60,20 +75,25 @@ class AndroidBridge:
             "/data/local/xbin/su",
             "/data/local/bin/su",
         ]
-        if shutil.which("su") is not None:
-            return True
-        return any(os.path.exists(p) for p in su_paths)
+        available = (shutil.which("su") is not None) or any(os.path.exists(p) for p in su_paths)
+        self._root_available_cached = available
+        return available
 
     def has_command(self, cmd: str) -> bool:
         """Check if command binary exists in system PATH."""
         return shutil.which(cmd) is not None
 
     async def get_prop(self, prop_name: str, default: str = "") -> str:
-        """Fetch Android system property using getprop."""
+        """Fetch Android system property using getprop with in-memory caching."""
+        if prop_name in self._props_cache:
+            return self._props_cache[prop_name]
+
         if self.has_command("getprop"):
             res = await self.execute_shell(f"getprop {prop_name}", timeout=3)
             if res.success and res.stdout.strip():
-                return res.stdout.strip()
+                val = res.stdout.strip()
+                self._props_cache[prop_name] = val
+                return val
         return default
 
     def _build_root_command(self, raw_cmd: str) -> str:
@@ -249,17 +269,12 @@ class AndroidBridge:
             "root_available": self.is_root_available(),
         }
 
-        # Query Android properties via getprop
+        # Query Android properties via getprop (cached)
         if self.has_command("getprop"):
-            res_mfg = await self.execute_shell("getprop ro.product.manufacturer", timeout=5)
-            res_model = await self.execute_shell("getprop ro.product.model", timeout=5)
-            res_rel = await self.execute_shell("getprop ro.build.version.release", timeout=5)
-            res_sdk = await self.execute_shell("getprop ro.build.version.sdk", timeout=5)
-
-            info["manufacturer"] = res_mfg.stdout or "Unknown"
-            info["model"] = res_model.stdout or "Unknown"
-            info["android_version"] = res_rel.stdout or "Unknown"
-            info["sdk_version"] = res_sdk.stdout or "Unknown"
+            info["manufacturer"] = await self.get_prop("ro.product.manufacturer", "Unknown")
+            info["model"] = await self.get_prop("ro.product.model", "Unknown")
+            info["android_version"] = await self.get_prop("ro.build.version.release", "Unknown")
+            info["sdk_version"] = await self.get_prop("ro.build.version.sdk", "Unknown")
         else:
             info["manufacturer"] = platform.system()
             info["model"] = platform.machine()

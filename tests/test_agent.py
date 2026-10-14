@@ -206,6 +206,63 @@ async def test_bridge_timeout():
     assert "timed out" in res.stderr
 
 
+@pytest.mark.asyncio
+async def test_bridge_property_and_root_caching(monkeypatch):
+    bridge = AndroidBridge()
+    bridge.clear_cache()
+
+    # 1. Test get_prop caching
+    shell_calls = 0
+
+    async def mock_execute_shell(cmd, **kwargs):
+        nonlocal shell_calls
+        shell_calls += 1
+        return CommandResult(
+            stdout="Pixel 8 Pro",
+            stderr="",
+            returncode=0,
+            command=cmd,
+            executed_as_root=False,
+        )
+
+    monkeypatch.setattr(bridge, "has_command", lambda cmd: True)
+    monkeypatch.setattr(bridge, "execute_shell", mock_execute_shell)
+
+    val1 = await bridge.get_prop("ro.product.model")
+    assert val1 == "Pixel 8 Pro"
+    assert shell_calls == 1
+
+    # Second call should be served from cache
+    val2 = await bridge.get_prop("ro.product.model")
+    assert val2 == "Pixel 8 Pro"
+    assert shell_calls == 1
+
+    # Clear cache and call again
+    bridge.clear_cache()
+    val3 = await bridge.get_prop("ro.product.model")
+    assert val3 == "Pixel 8 Pro"
+    assert shell_calls == 2
+
+    # 2. Test is_root_available caching
+    which_calls = 0
+
+    def mock_which(cmd):
+        nonlocal which_calls
+        which_calls += 1
+        return "/system/bin/su"
+
+    import shutil
+    monkeypatch.setattr(shutil, "which", mock_which)
+
+    bridge.clear_cache()
+    assert bridge.is_root_available() is True
+    assert which_calls == 1
+
+    # Cached call
+    assert bridge.is_root_available() is True
+    assert which_calls == 1
+
+
 # ---------------------------------------------------------------------------
 # 4. Tool Execution Tests
 # ---------------------------------------------------------------------------
@@ -1554,6 +1611,94 @@ def test_ambiguity_handler_skill_structure():
     assert "Lokasi atau Path Penyimpanan Berkas" in content
     assert "Standar dan Format Pertanyaan Klarifikasi" in content
     assert "tidak bertele-tele" in content.lower()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_multi_tool_execution():
+    mock_ai = MagicMock(spec=AIClient)
+
+    # 1st step: LLM returns 2 tool calls
+    tc1 = MagicMock()
+    tc1.id = "tc_time"
+    tc1.function.name = "time_manager"
+    tc1.function.arguments = '{"action": "current_time"}'
+
+    tc2 = MagicMock()
+    tc2.id = "tc_battery"
+    tc2.function.name = "system_settings"
+    tc2.function.arguments = '{"action": "battery"}'
+
+    step1_msg = MagicMock(content=None, tool_calls=[tc1, tc2])
+    step1_resp = MagicMock(choices=[MagicMock(message=step1_msg)])
+
+    step2_msg = MagicMock(content="Jam sekarang 14:00 dan baterai 85%.", tool_calls=None)
+    step2_resp = MagicMock(choices=[MagicMock(message=step2_msg)])
+
+    mock_ai.get_chat_completion = AsyncMock(side_effect=[step1_resp, step2_resp])
+
+    agent = FafAgent(ai_client=mock_ai)
+    ctx = ToolContext(chat_id=888, user_id=999)
+
+    exec_order = []
+    with patch.object(agent.registry, "execute") as mock_exec:
+        async def mock_execute(name, context, arguments):
+            exec_order.append(name)
+            await asyncio.sleep(0.05)
+            return ToolResult(success=True, output=f"result of {name}")
+
+        mock_exec.side_effect = mock_execute
+
+        start = asyncio.get_event_loop().time()
+        res = await agent.run("cek jam dan baterai", context=ctx)
+        duration = asyncio.get_event_loop().time() - start
+
+        assert "Jam sekarang" in res.text
+        assert mock_exec.call_count == 2
+        # Because tools run concurrently with sleep(0.05), total duration should be ~0.05s, definitely < 0.15s
+        assert duration < 0.15
+
+        # Check history has both tool outputs
+        history = agent.get_history(chat_id=888)
+        tool_msgs = [m for m in history if m.get("role") == "tool"]
+        assert len(tool_msgs) == 2
+        assert tool_msgs[0]["tool_call_id"] == "tc_time"
+        assert tool_msgs[1]["tool_call_id"] == "tc_battery"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_multi_tool_prioritizes_clarification():
+    mock_ai = MagicMock(spec=AIClient)
+
+    tc_other = MagicMock()
+    tc_other.id = "tc_other"
+    tc_other.function.name = "system_settings"
+    tc_other.function.arguments = '{"action": "wifi"}'
+
+    tc_clarify = MagicMock()
+    tc_clarify.id = "tc_clarify"
+    tc_clarify.function.name = "ask_clarification"
+    tc_clarify.function.arguments = '{"question": "Wifi mana yang ingin disambungkan?"}'
+
+    # Multi tool calls where clarification is one of them
+    step1_msg = MagicMock(content=None, tool_calls=[tc_other, tc_clarify])
+    step1_resp = MagicMock(choices=[MagicMock(message=step1_msg)])
+
+    mock_ai.get_chat_completion = AsyncMock(return_value=step1_resp)
+
+    agent = FafAgent(ai_client=mock_ai)
+    ctx = ToolContext(chat_id=777, user_id=888)
+
+    res = await agent.run("konek wifi", context=ctx)
+    assert "Wifi mana yang ingin disambungkan?" in res.text
+
+    history = agent.get_history(chat_id=777)
+    tool_msgs = [m for m in history if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    # Verify clarification was recorded and the other was deferred
+    clarify_msg = next(m for m in tool_msgs if m["tool_call_id"] == "tc_clarify")
+    deferred_msg = next(m for m in tool_msgs if m["tool_call_id"] == "tc_other")
+    assert "Pertanyaan klarifikasi telah diajukan" in clarify_msg["content"]
+    assert "Operasi ditunda" in deferred_msg["content"]
 
 
 # ---------------------------------------------------------------------------

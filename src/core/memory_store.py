@@ -57,7 +57,13 @@ class MemoryStore:
         self._target_path = db_path or self.settings.memory_db_path
         self._actual_path: str | None = None
         self._lock = threading.RLock()
+        self._prompt_cache: dict[tuple[int, int, int], str] = {}
         self._init_db()
+
+    def invalidate_cache(self) -> None:
+        """Kosongkan in-memory cache system prompt block."""
+        with self._lock:
+            self._prompt_cache.clear()
 
     def _resolve_db_path(self) -> str:
         if self._actual_path:
@@ -244,6 +250,7 @@ class MemoryStore:
                     pass
 
                 conn.commit()
+                self._prompt_cache.clear()
 
         return self.get_fact(clean_key) or {}
 
@@ -302,6 +309,7 @@ class MemoryStore:
                     pass
 
                 conn.commit()
+                self._prompt_cache.clear()
 
         return self.get_fact(clean_key)
 
@@ -323,6 +331,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return True
 
     def search_facts(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -396,6 +405,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return cur.rowcount
 
     # =========================================================================
@@ -443,6 +453,7 @@ class MemoryStore:
                     pass
 
                 conn.commit()
+                self._prompt_cache.clear()
 
                 row = conn.execute("SELECT * FROM episodes WHERE id = ?;", (episode_id,)).fetchone()
                 return dict(row) if row else {}
@@ -522,6 +533,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return cur.rowcount > 0
 
     def clear_all_episodes(self) -> int:
@@ -534,6 +546,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return cur.rowcount
 
     # =========================================================================
@@ -607,6 +620,7 @@ class MemoryStore:
                     pass
 
                 conn.commit()
+                self._prompt_cache.clear()
 
                 row = conn.execute("SELECT * FROM graph_relations WHERE id = ?;", (rel_id,)).fetchone()
                 return dict(row) if row else {}
@@ -731,6 +745,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return True
 
     def list_all_relations(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -754,6 +769,7 @@ class MemoryStore:
                 except sqlite3.OperationalError:
                     pass
                 conn.commit()
+                self._prompt_cache.clear()
                 return cur.rowcount
 
     # =========================================================================
@@ -909,11 +925,18 @@ class MemoryStore:
         max_episodes: int = 3,
     ) -> str:
         """Format memori kognitif lengkap (Fakta, Graf, Episodik) untuk diinjeksikan ke System Prompt."""
+        cache_key = (max_facts, max_relations, max_episodes)
+        with self._lock:
+            if cache_key in self._prompt_cache:
+                return self._prompt_cache[cache_key]
+
         facts = self.list_all_facts()
         episodes = self.list_episodes(limit=max_episodes, min_importance=2)
         relations = self.list_all_relations(limit=max_relations)
 
         if not facts and not episodes and not relations:
+            with self._lock:
+                self._prompt_cache[cache_key] = ""
             return ""
 
         sections: list[str] = []
@@ -954,7 +977,10 @@ class MemoryStore:
         sections.append(
             "(Gunakan fakta dan memori di atas secara alami dalam menjawab tanpa perlu bertanya ulang.)"
         )
-        return "\n\n".join(sections)
+        result = "\n\n".join(sections)
+        with self._lock:
+            self._prompt_cache[cache_key] = result
+        return result
 
 
 # Global singleton instance
