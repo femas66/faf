@@ -21,9 +21,10 @@ class ProductivityControlTool(BaseTool):
     name = "productivity_control"
     description = (
         "Manajemen produktivitas dan komunikasi Android: memasang alarm jam tertentu, timer hitung mundur, "
-        "membuat agenda kalender, menampilkan notifikasi pop-up layar dengan aksi, pesan toast mengambang, "
-        "membuat & membaca catatan lokal (/sdcard/Notes), mengirim & membaca SMS, mencari kontak buku telepon, "
-        "melakukan panggilan telepon, mengecek info seluler/SIM, serta membaca dan menyalin teks clipboard."
+        "membuat agenda kalender, menampilkan notifikasi pop-up layar dengan aksi, membaca notifikasi aktif di bilah status "
+        "(WhatsApp, SMS, OTP, info aplikasi), pesan toast mengambang, membuat & membaca catatan lokal (/sdcard/Notes), "
+        "mengirim & membaca SMS, mencari kontak buku telepon, melakukan panggilan telepon, mengecek info seluler/SIM, "
+        "serta membaca dan menyalin teks clipboard."
     )
     parameters = {
         "type": "object",
@@ -35,6 +36,7 @@ class ProductivityControlTool(BaseTool):
                     "set_timer",
                     "add_calendar",
                     "show_notification",
+                    "list_notifications",
                     "toast",
                     "create_note",
                     "list_notes",
@@ -48,6 +50,10 @@ class ProductivityControlTool(BaseTool):
                     "clipboard_set",
                 ],
                 "description": "Tindakan produktivitas atau komunikasi yang diinginkan.",
+            },
+            "package_name": {
+                "type": "string",
+                "description": "Nama paket Android untuk filter 'list_notifications' (misal: 'com.whatsapp', 'org.telegram.messenger').",
             },
             "hour": {
                 "type": "integer",
@@ -221,6 +227,69 @@ class ProductivityControlTool(BaseTool):
                 success=True,
                 output=f"Notifikasi pop-up berhasil dimunculkan di layar ponsel: '{title}'.",
             )
+
+        # -------------------------------------------------------------------
+        # 4b. Action: LIST_NOTIFICATIONS
+        # -------------------------------------------------------------------
+        elif action == "list_notifications":
+            limit = kwargs.get("limit", 10)
+            target_pkg = kwargs.get("package_name", "").strip().lower()
+            query = kwargs.get("search_query", "").strip().lower()
+
+            res = await bridge.execute_shell("termux-notification-list")
+            if not res.success or not res.stdout.strip():
+                if bridge.is_root_available():
+                    res_dump = await bridge.execute_shell(
+                        "dumpsys notification --noredact | grep -E 'tickerText|android.title|android.text'",
+                        as_root=True,
+                    )
+                    if res_dump.success and res_dump.stdout.strip():
+                        return ToolResult(
+                            success=True,
+                            output=f"Notifikasi Aktif (via Dumpsys):\n{res_dump.stdout.strip()[:2000]}",
+                        )
+                return ToolResult(
+                    success=True,
+                    output="Tidak ada notifikasi aktif saat ini atau izin Notification Access belum diberikan ke Termux:API.",
+                )
+
+            try:
+                notif_list = json.loads(res.stdout)
+                if not isinstance(notif_list, list) or not notif_list:
+                    return ToolResult(success=True, output="Tidak ada notifikasi aktif di bilah status saat ini.")
+
+                filtered = []
+                for item in notif_list:
+                    pkg = item.get("packageName", "")
+                    title = item.get("title", "")
+                    content = item.get("content", "")
+                    when = item.get("when", "")
+
+                    if target_pkg and target_pkg not in pkg.lower():
+                        continue
+                    if query and (query not in str(title).lower() and query not in str(content).lower()):
+                        continue
+
+                    app_name = pkg.split(".")[-1].capitalize() if pkg else "Aplikasi"
+                    time_info = f" ({when})" if when else ""
+                    content_str = content if content else "(tanpa isi teks)"
+                    filtered.append(f"• [{app_name}] {title}: {content_str}{time_info}")
+
+                if not filtered:
+                    return ToolResult(
+                        success=True,
+                        output="Tidak ditemukan notifikasi yang cocok dengan kriteria pencarian.",
+                    )
+
+                output_text = f"Daftar Notifikasi Aktif ({len(filtered)} ditemukan):\n" + "\n".join(filtered[:limit])
+                return ToolResult(success=True, output=output_text)
+            except Exception as e:
+                logger.warning(f"Failed to parse termux-notification-list output: {e}")
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal memproses data notifikasi: {e}",
+                )
 
         # -------------------------------------------------------------------
         # 5. Action: TOAST

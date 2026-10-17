@@ -38,6 +38,7 @@ from src.bot.handlers.commands import (
 from src.bot.handlers.chat import handle_chat_message
 from src.tools.reminder_mgr import _default_worker
 from src.tools.cronjob_mgr import _default_cron_worker
+from src.core.android_bridge import bridge
 from src.core.agent import agent
 
 logger = logging.getLogger("faf_agent")
@@ -113,6 +114,13 @@ def create_application() -> Application:
         _default_worker.start()
         _default_cron_worker.start()
         logger.info("Reminder and CronJob background workers activated in application.")
+        if bridge.is_root_available():
+            try:
+                pid = os.getpid()
+                await bridge.execute_shell(f"echo -1000 > /proc/{pid}/oom_score_adj", as_root=True)
+                logger.info("Bot process (PID %d) immune from Android LMKD (oom_score_adj = -1000)", pid)
+            except Exception as e:
+                logger.debug("Could not set oom_score_adj on startup: %s", e)
 
     async def on_shutdown(application: Application) -> None:
         _default_worker.stop()

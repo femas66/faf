@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import shlex
+import xml.etree.ElementTree as ET
 from typing import Any
 
 from src.core.android_bridge import bridge
@@ -45,6 +46,7 @@ class DeviceInteractionTool(BaseTool):
         "Kontrol interaksi antarmuka layar sentuh Android fisik: mengetuk koordinat layar (tap x y), "
         "mengusap/menggulir layar (swipe/scroll dari x1 y1 ke x2 y2), menekan tombol navigasi hardware/virtual "
         "(HOME, BACK, RECENTS, POWER, VOLUME, ENTER), mengetik teks langsung ke input aktif di layar (type_text), "
+        "menginspeksi elemen hierarki UI layar dan mencari tombol/teks untuk tap otomatis (inspect_ui), "
         "membangunkan/mematikan layar (wake/sleep), menarik tirai notifikasi (expand_notifications), "
         "membuka panel quick settings, serta mengecek resolusi layar untuk perhitungan koordinat sentuhan."
     )
@@ -58,6 +60,7 @@ class DeviceInteractionTool(BaseTool):
                     "swipe",
                     "keyevent",
                     "type_text",
+                    "inspect_ui",
                     "wake",
                     "sleep",
                     "expand_notifications",
@@ -103,6 +106,19 @@ class DeviceInteractionTool(BaseTool):
             "text": {
                 "type": "string",
                 "description": "Teks yang akan diketikkan secara otomatis ke kolom input yang aktif di layar.",
+            },
+            "search_text": {
+                "type": "string",
+                "description": "Kata kunci teks atau label elemen antarmuka yang dicari untuk aksi 'inspect_ui' (contoh: 'Check In', 'Kirim', 'Beli').",
+            },
+            "resource_id": {
+                "type": "string",
+                "description": "Resource ID elemen antarmuka yang dicari untuk aksi 'inspect_ui' (contoh: 'com.whatsapp:id/send').",
+            },
+            "auto_tap": {
+                "type": "boolean",
+                "description": "Jika true pada aksi 'inspect_ui', langsung ketuk (tap) elemen pertama yang cocok secara otomatis.",
+                "default": False,
             },
         },
         "required": ["action"],
@@ -239,5 +255,117 @@ class DeviceInteractionTool(BaseTool):
                 success=True,
                 output=f"Ukuran & Resolusi Layar Ponsel:\n• Resolusi: {res.stdout.strip()}\n• Kerapatan: {res_den.stdout.strip()}",
             )
+
+        # -------------------------------------------------------------------
+        # 11. Action: INSPECT_UI
+        # -------------------------------------------------------------------
+        elif action == "inspect_ui":
+            search_text = kwargs.get("search_text", "").strip().lower()
+            resource_id = kwargs.get("resource_id", "").strip().lower()
+            auto_tap = kwargs.get("auto_tap", False)
+
+            dump_path = "/data/local/tmp/faf_window_dump.xml"
+            # 1. Run uiautomator dump
+            res_dump = await bridge.execute_shell(
+                f"uiautomator dump {dump_path} || cmd uiautomator dump {dump_path}",
+                as_root=bridge.is_root_available(),
+                timeout=12,
+            )
+
+            # 2. Read dump file
+            res_cat = await bridge.execute_shell(
+                f"cat {dump_path}",
+                as_root=bridge.is_root_available(),
+                timeout=5,
+            )
+            xml_content = res_cat.stdout.strip() if res_cat.success else ""
+
+            if not xml_content or "<hierarchy" not in xml_content:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="Gagal mengambil hierarki antarmuka layar (UI dump). Pastikan layar aktif atau berikan izin Root/ADB.",
+                )
+
+            try:
+                root = ET.fromstring(xml_content)
+            except Exception as e:
+                logger.warning(f"Failed to parse uiautomator XML: {e}")
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal mem-parse XML hierarki UI layar: {e}",
+                )
+
+            matched_elements: list[dict[str, Any]] = []
+            bounds_pattern = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+            for node in root.iter("node"):
+                text = node.attrib.get("text", "")
+                content_desc = node.attrib.get("content-desc", "")
+                res_id = node.attrib.get("resource-id", "")
+                cls_name = node.attrib.get("class", "").split(".")[-1]
+                bounds_str = node.attrib.get("bounds", "")
+                clickable = node.attrib.get("clickable", "false") == "true"
+
+                m = bounds_pattern.match(bounds_str)
+                if not m:
+                    continue
+
+                x1, y1, x2, y2 = map(int, m.groups())
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+
+                is_match = False
+                if search_text:
+                    if (search_text in text.lower()) or (search_text in content_desc.lower()):
+                        is_match = True
+                elif resource_id:
+                    if resource_id in res_id.lower():
+                        is_match = True
+                else:
+                    if text or content_desc or clickable:
+                        is_match = True
+
+                if is_match:
+                    display_label = text or content_desc or (res_id.split("/")[-1] if "/" in res_id else res_id) or cls_name
+                    matched_elements.append({
+                        "label": display_label,
+                        "text": text,
+                        "content_desc": content_desc,
+                        "resource_id": res_id,
+                        "class": cls_name,
+                        "center": (cx, cy),
+                        "bounds": (x1, y1, x2, y2),
+                        "clickable": clickable,
+                    })
+
+            if not matched_elements:
+                query_desc = f"dengan filter '{search_text or resource_id}'" if (search_text or resource_id) else ""
+                return ToolResult(
+                    success=True,
+                    output=f"Tidak ditemukan elemen antarmuka yang cocok pada layar saat ini {query_desc}.".strip(),
+                )
+
+            if auto_tap:
+                target = matched_elements[0]
+                tcx, tcy = target["center"]
+                res_tap = await bridge.execute_shell(f"input tap {tcx} {tcy}")
+                target_label = target["label"]
+                return ToolResult(
+                    success=True,
+                    output=f"Elemen '{target_label}' ditemukan pada posisi ({tcx}, {tcy}) dan berhasil diketuk (tap otomatis).",
+                )
+
+            lines = [f"Elemen Antarmuka Layar Terdeteksi ({len(matched_elements)} elemen):"]
+            for el in matched_elements[:20]:
+                cx, cy = el["center"]
+                clk = " [dapat diklik]" if el["clickable"] else ""
+                lines.append(f"• {el['label']} ({el['class']}){clk} -> Koordinat: ({cx}, {cy})")
+
+            return ToolResult(success=True, output="\n".join(lines))
 
         return ToolResult(success=False, output="", error=f"Aksi device_interaction '{action}' tidak dikenal.")

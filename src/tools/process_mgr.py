@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import shlex
 import signal
 from typing import Any
 
@@ -24,6 +26,20 @@ def _read_proc_file(filepath: str) -> str:
     return ""
 
 
+def _parse_meminfo() -> dict[str, int]:
+    """Parse /proc/meminfo into a dict of kB values."""
+    info: dict[str, int] = {}
+    content = _read_proc_file("/proc/meminfo")
+    for line in content.splitlines():
+        parts = line.split(":")
+        if len(parts) == 2:
+            key = parts[0].strip()
+            val_parts = parts[1].strip().split()
+            if val_parts and val_parts[0].isdigit():
+                info[key] = int(val_parts[0])
+    return info
+
+
 class ProcessManagerTool(BaseTool):
     """Deep Linux and Android Process Management Tool (Pure Linux /proc & ps, Zero psutil)."""
 
@@ -32,6 +48,8 @@ class ProcessManagerTool(BaseTool):
         "Manajemen proses sistem Linux & Android: melihat daftar proses sistem yang berjalan "
         "(dengan filter nama, pengurutan memori/CPU), inspeksi mendalam detail proses via PID "
         "(status, memori RSS, thread, command line), ringkasan top proses & beban sistem (load average), "
+        "pembersihan memori RAM dan drop caches (clean_ram), analisis tekanan memori/PSI (memory_pressure), "
+        "imunisasi proteksi proses dari Android LMKD (protect_process), "
         "serta menghentikan proses via PID atau nama proses dengan proteksi mutlak anti self-termination."
     )
     parameters = {
@@ -45,6 +63,9 @@ class ProcessManagerTool(BaseTool):
                     "top_summary",
                     "kill_process",
                     "kill_by_name",
+                    "clean_ram",
+                    "memory_pressure",
+                    "protect_process",
                 ],
                 "description": "Tindakan manajemen proses yang diinginkan.",
             },
@@ -263,5 +284,109 @@ class ProcessManagerTool(BaseTool):
                 success=True,
                 output=f"Tidak ditemukan proses aktif dengan nama '{proc_name}'.",
             )
+
+        # -------------------------------------------------------------------
+        # 6. Action: CLEAN_RAM
+        # -------------------------------------------------------------------
+        elif action == "clean_ram":
+            mem_before = _parse_meminfo()
+            avail_before = mem_before.get("MemAvailable", mem_before.get("MemFree", 0)) // 1024
+            free_before = mem_before.get("MemFree", 0) // 1024
+
+            # 1. Kill background apps safely using Android am kill-all
+            await bridge.execute_shell("am kill-all", as_root=bridge.is_root_available())
+
+            # 2. If root available, flush pagecache, dentries, and inodes
+            dropped_caches = False
+            if bridge.is_root_available():
+                res_drop = await bridge.execute_shell(
+                    "sync && echo 3 > /proc/sys/vm/drop_caches",
+                    as_root=True,
+                )
+                dropped_caches = res_drop.success
+
+            await asyncio.sleep(0.3)
+            mem_after = _parse_meminfo()
+            avail_after = mem_after.get("MemAvailable", mem_after.get("MemFree", 0)) // 1024
+            free_after = mem_after.get("MemFree", 0) // 1024
+            total_mem = mem_after.get("MemTotal", 0) // 1024
+
+            diff_avail = max(0, avail_after - avail_before)
+            root_info = " (termasuk drop_caches sistem via root)" if dropped_caches else ""
+
+            out_lines = [
+                f"Pembersihan Memori RAM Berhasil{root_info}:",
+                f"• Memori Total Perangkat: {total_mem} MB" if total_mem else "• Status: Aplikasi background telah dibersihkan",
+                f"• Memori Tersedia: {avail_before} MB -> {avail_after} MB (+{diff_avail} MB dibebaskan)",
+                f"• Memori Bebas: {free_before} MB -> {free_after} MB",
+                "• Catatan: Proses background yang menganggur telah dihentikan secara aman via 'am kill-all'.",
+            ]
+            return ToolResult(success=True, output="\n".join(out_lines))
+
+        # -------------------------------------------------------------------
+        # 7. Action: MEMORY_PRESSURE
+        # -------------------------------------------------------------------
+        elif action == "memory_pressure":
+            mem = _parse_meminfo()
+            total_mb = mem.get("MemTotal", 0) // 1024
+            avail_mb = mem.get("MemAvailable", 0) // 1024
+            free_mb = mem.get("MemFree", 0) // 1024
+            cached_mb = mem.get("Cached", 0) // 1024
+            buffers_mb = mem.get("Buffers", 0) // 1024
+            swap_total = mem.get("SwapTotal", 0) // 1024
+            swap_free = mem.get("SwapFree", 0) // 1024
+            swap_used = max(0, swap_total - swap_free)
+
+            used_mb = max(0, total_mb - avail_mb)
+            used_pct = (used_mb / total_mb * 100) if total_mb else 0
+
+            lines = [
+                "Laporan Tekanan Memori & RAM Perangkat (6GB Class):",
+                f"• Total RAM Fisik: {total_mb} MB",
+                f"• RAM Digunakan: {used_mb} MB ({used_pct:.1f}%)",
+                f"• RAM Tersedia: {avail_mb} MB",
+                f"• RAM Bebas Murni: {free_mb} MB",
+                f"• Page Cache & Buffers: {cached_mb + buffers_mb} MB",
+            ]
+            if swap_total > 0:
+                swap_pct = (swap_used / swap_total * 100) if swap_total else 0
+                lines.append(f"• Swap / zRAM: {swap_used} MB / {swap_total} MB ({swap_pct:.1f}%)")
+
+            # Check PSI (Pressure Stall Information) if present
+            psi_content = _read_proc_file("/proc/pressure/memory")
+            if psi_content:
+                lines.append("• Indikator Tekanan PSI (Memory Stall):")
+                for psi_line in psi_content.splitlines():
+                    if psi_line.strip():
+                        lines.append(f"  - {psi_line.strip()}")
+
+            return ToolResult(success=True, output="\n".join(lines))
+
+        # -------------------------------------------------------------------
+        # 8. Action: PROTECT_PROCESS
+        # -------------------------------------------------------------------
+        elif action == "protect_process":
+            target_pid = kwargs.get("pid") or os.getpid()
+
+            if bridge.is_root_available():
+                res = await bridge.execute_shell(
+                    f"echo -1000 > /proc/{target_pid}/oom_score_adj",
+                    as_root=True,
+                )
+                res_check = await bridge.execute_shell(f"cat /proc/{target_pid}/oom_score_adj", as_root=True)
+                val = res_check.stdout.strip()
+                return ToolResult(
+                    success=True,
+                    output=f"Proses PID {target_pid} berhasil diimunisasi dari Android LMKD (oom_score_adj: {val}).",
+                )
+            else:
+                curr_score = _read_proc_file(f"/proc/{target_pid}/oom_score_adj")
+                return ToolResult(
+                    success=True,
+                    output=(
+                        f"Nilai oom_score_adj PID {target_pid} saat ini: {curr_score or 'Tidak diketahui'}.\n"
+                        "Untuk mengatur proteksi -1000 (kebal pembunuhan LMKD), akses Superuser (root) diperlukan."
+                    ),
+                )
 
         return ToolResult(success=False, output="", error=f"Aksi process_manager '{action}' tidak dikenal.")

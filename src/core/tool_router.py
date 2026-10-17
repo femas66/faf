@@ -96,6 +96,7 @@ SYSTEM_KEYWORDS = {
     "cuaca", "hujan", "weather", "suhu", "temperatur", "ramalan", "mendung", "prakiraan",
     "sms", "telepon", "panggilan", "call", "kontak", "bts", "clipboard",
     "tap", "tekan", "sentuh", "swipe", "scroll", "geser", "ketik", "back", "home", "recents", "notifikasi",
+    "notif", "baca notifikasi", "otp", "inspect ui", "elemen layar", "hierarki ui", "tombol layar",
 }
 
 FILE_KEYWORDS = {
@@ -120,6 +121,7 @@ DEV_ADVANCED_KEYWORDS = {
     "app", "aplikasi", "apk", "package", "install", "uninstall", "force stop", "current app",
     "running app", "buka aplikasi", "tutup aplikasi", "daftar aplikasi", "pm", "am",
     "process", "proses", "pid", "top cpu", "cpu", "ram", "memori linux", "kill", "ps",
+    "bersihkan ram", "clean ram", "memory pressure", "tekanan memori", "oom", "zram", "swap", "drop caches",
     "python", "repl", "eksekusi kode", "script", "hitung", "kalkulasi", "evaluasi",
     "root", "su", "tsu", "shell", "terminal", "bash", "command", "perintah shell", "dmesg", "logcat",
     "cron", "cronjob", "watcher", "pemantauan", "berkala", "otomasi", "tick", "sensor watcher",
