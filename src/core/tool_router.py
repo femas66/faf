@@ -154,8 +154,13 @@ class ToolRouter:
     Falls back to ALL tools whenever ambiguity or multi-domain intent is detected.
     """
 
-    def __init__(self, registry: ToolRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry | None = None,
+        custom_skill_registry: Any = None,
+    ) -> None:
         self.registry = registry or default_registry
+        self.custom_skill_registry = custom_skill_registry
 
     def classify_categories(
         self,
@@ -251,16 +256,39 @@ class ToolRouter:
         registry = self.registry or default_registry
         tool_names = self.get_tool_names(user_message, history=history)
 
+        # Retrieve relevant active custom skills (top-k) to prevent token bloat
+        try:
+            csr = self.custom_skill_registry
+            if csr is None:
+                from src.custom_skills.registry import custom_skill_registry as global_csr
+                csr = global_csr
+            matched_custom_skills = csr.get_top_k(user_message, k=3)
+            custom_schemas = [s.to_openai_tool() for s in matched_custom_skills]
+        except Exception as e:
+            logger.debug(f"Could not load custom skills for routing: {e}")
+            custom_schemas = []
+
         if tool_names is None:
             # Fallback to all registered tools
-            return registry.get_openai_tools()
+            all_tools = registry.get_openai_tools()
+            existing_names = {t["function"]["name"] for t in all_tools if "function" in t}
+            for cs in custom_schemas:
+                if cs.get("function", {}).get("name") not in existing_names:
+                    all_tools.append(cs)
+            return all_tools
 
         if len(tool_names) == 0:
-            # Pure conversation: 0 tools
+            # Pure conversation (greetings, smalltalk, creative writing): 0 tools
             return None
 
-        # Filter registry tools
-        return [tool.to_openai_tool() for tool in registry.get_all() if tool.name in tool_names]
+        # Filter registry tools and append matched custom skills
+        selected_tools = [tool.to_openai_tool() for tool in registry.get_all() if tool.name in tool_names]
+        selected_names = {t["function"]["name"] for t in selected_tools if "function" in t}
+        for cs in custom_schemas:
+            if cs.get("function", {}).get("name") not in selected_names:
+                selected_tools.append(cs)
+
+        return selected_tools
 
 
 # Singleton default router

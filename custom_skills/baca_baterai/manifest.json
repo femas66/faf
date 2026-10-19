@@ -1,0 +1,22 @@
+{
+  "name": "baca_baterai",
+  "version": "1.0.0",
+  "description": "Membaca status baterai, persentase daya, dan apakah ponsel sedang dicas.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  },
+  "permissions": {
+    "termux_api": ["termux-battery-status"],
+    "network": [],
+    "fs_read": [],
+    "fs_write": [],
+    "shell": false
+  },
+  "timeout_sec": 10,
+  "created_by": "user",
+  "status": "active",
+  "created_at": "2026-10-19T21:20:00Z",
+  "updated_at": "2026-10-19T21:20:00Z"
+}

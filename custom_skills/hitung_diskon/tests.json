@@ -1,0 +1,17 @@
+[
+  {
+    "name": "hitung_diskon_normal",
+    "input": {"harga": 100000, "diskon_persen": 20},
+    "expected_output_keys": ["harga_akhir", "potongan", "success"]
+  },
+  {
+    "name": "hitung_diskon_nol",
+    "input": {"harga": 50000, "diskon_persen": 0},
+    "expected_output_keys": ["harga_akhir", "success"]
+  },
+  {
+    "name": "hitung_diskon_negatif_gagal",
+    "input": {"harga": 100000, "diskon_persen": -10},
+    "expected_output_keys": ["error", "success"]
+  }
+]

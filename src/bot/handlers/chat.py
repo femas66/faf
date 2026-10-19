@@ -177,6 +177,26 @@ async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not prompt.strip():
         return
 
+    # Check pending custom skill approval
+    from src.custom_skills.pipeline import skill_pipeline
+    pending_prop = skill_pipeline.get_pending_proposal(chat_id)
+    if pending_prop:
+        clean_text = prompt.strip().lower()
+        if clean_text in ("ya", "setuju", "oke", "ok", "lanjut", "aktifkan"):
+            success, reply_text = await skill_pipeline.approve_proposal(chat_id, user_id)
+            await message.reply_text(reply_text)
+            return
+        elif clean_text in ("tidak", "batal", "tolak", "jangan"):
+            success, reply_text = await skill_pipeline.reject_proposal(chat_id, user_id)
+            await message.reply_text(reply_text)
+            return
+        elif clean_text in ("lihat kode", "cek kode", "kode"):
+            code_preview = pending_prop.code[:3800]
+            await message.reply_text(
+                f"Kode Skill '{pending_prop.skill_name}':\n\n{code_preview}\n\nKetik 'Ya' untuk setujui atau 'Tidak' untuk tolak."
+            )
+            return
+
     existing_task = agent._active_tasks.get(chat_id)
     if existing_task and not existing_task.done():
         await message.reply_text(

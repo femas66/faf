@@ -21,12 +21,14 @@ from src.tools.clarification import ClarificationTool
 from src.tools.cronjob_mgr import CronJobTool
 from src.tools.weather_mgr import WeatherForecastTool
 from src.tools.pdf_mgr import PDFManagerTool
+from src.tools.skill_maker import CreateCustomSkillTool
 
 
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry with all Android tools."""
     registry = ToolRegistry()
     registry.register(ClarificationTool())
+    registry.register(CreateCustomSkillTool())
     registry.register(RootShellExecTool())
     registry.register(SystemSettingsTool())
     registry.register(ProductivityControlTool())
@@ -58,6 +60,7 @@ __all__ = [
     "ToolResult",
     "ToolRegistry",
     "ClarificationTool",
+    "CreateCustomSkillTool",
     "RootShellExecTool",
     "SystemSettingsTool",
     "ProductivityControlTool",

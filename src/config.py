@@ -44,6 +44,9 @@ class Settings:
     temp_media_dir: str = "/data/data/com.termux/files/home/faf_media"
     memory_db_path: str = "/data/data/com.termux/files/home/faf_memory.db"
     agent_max_steps: int = 15
+    custom_skills_dir: str = "custom_skills"
+    custom_skills_max_active: int = 30
+    custom_skills_runner_timeout: int = 15
 
     def __init__(self, **kwargs: Any) -> None:
         # Load from .env file if present
@@ -100,6 +103,13 @@ class Settings:
             or "/data/data/com.termux/files/home/faf_memory.db"
         )
         self.agent_max_steps = int(get_val("agent_max_steps", 15))
+        self.custom_skills_dir = str(
+            get_val("custom_skills_dir", "custom_skills") or "custom_skills"
+        )
+        self.custom_skills_max_active = int(get_val("custom_skills_max_active", 30))
+        self.custom_skills_runner_timeout = int(
+            get_val("custom_skills_runner_timeout", 15)
+        )
 
 
 # Global cached settings instance

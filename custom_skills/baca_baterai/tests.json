@@ -1,0 +1,17 @@
+[
+  {
+    "name": "baca_status_normal",
+    "input": {},
+    "expected_output_keys": ["percentage", "is_charging", "success"]
+  },
+  {
+    "name": "baca_dengan_parameter_ekstra",
+    "input": {"verbose": true},
+    "expected_output_keys": ["percentage", "success"]
+  },
+  {
+    "name": "baca_edge_case_input_kosong",
+    "input": {"format": "invalid_mode"},
+    "expected_output_keys": ["success"]
+  }
+]

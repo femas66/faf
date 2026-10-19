@@ -34,6 +34,10 @@ from src.bot.handlers.commands import (
     handle_callback_query,
     handle_doctor,
     handle_mode,
+    handle_skills,
+    handle_skill_info,
+    handle_skill_disable,
+    handle_skill_rollback,
 )
 from src.bot.handlers.chat import handle_chat_message
 from src.tools.reminder_mgr import _default_worker
@@ -160,6 +164,10 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("check", handle_doctor, block=False))
     app.add_handler(CommandHandler("mode", handle_mode, block=False))
     app.add_handler(CommandHandler("model", handle_mode, block=False))
+    app.add_handler(CommandHandler("skills", handle_skills, block=False))
+    app.add_handler(CommandHandler("skill_info", handle_skill_info, block=False))
+    app.add_handler(CommandHandler("skill_disable", handle_skill_disable, block=False))
+    app.add_handler(CommandHandler("skill_rollback", handle_skill_rollback, block=False))
 
     # Register Callback Query Handler (Inline buttons)
     app.add_handler(CallbackQueryHandler(handle_callback_query, block=False))

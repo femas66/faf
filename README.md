@@ -161,6 +161,10 @@ python main.py
 | `/su <perintah>` | Menjalankan perintah root shell langsung tanpa melalui penalaran LLM. |
 | `/cancel` | Menghentikan paksa tugas AI yang sedang diproses. |
 | `/clear` | Membersihkan riwayat percakapan sesi AI saat ini. |
+| `/skills` | Menampilkan daftar custom skills yang terpasang dan statusnya. |
+| `/skill_info <nama>` | Menampilkan detail parameter, izin yang diberikan, dan batas waktu skill. |
+| `/skill_disable <nama>` | Menonaktifkan custom skill tertentu (mengubah status ke DEPRECATED). |
+| `/skill_rollback <nama>` | Mengembalikan skill ke commit versi Git lokal sebelumnya (HEAD~1). |
 
 ---
 
@@ -173,9 +177,56 @@ Anda dapat mengirim berkas dokumen PDF secara langsung ke ruang obrolan Telegram
 
 ---
 
+## 🧩 Kemampuan Self-Extending Agent (Dynamic Custom Skills)
+
+`faf-agent` dapat memperluas kapabilitasnya sendiri secara otonom saat menemui tugas atau otomasi perangkat yang belum didukung oleh tool bawaan, dengan **jaminan keamanan dan persetujuan pengguna**:
+
+### 1. Prinsip Keamanan & Alur Kerja
+1. **Deteksi & Pembuatan:** Saat pengguna meminta kemampuan baru, agen merancang modul skill Python terisolasi via tool `create_custom_skill`.
+2. **Analisis Statis AST (Static Gate):** Kode diparsing untuk memblokir pemanggilan fungsi berbahaya (`eval`, `exec`, `compile`, `ctypes`, dunder reflection `__subclasses__`, serta akses file rahasia `.env`).
+3. **Pengujian Terisolasi (Runner):** Script diuji otomatis pada subprocess terpisah (`python3 -I`) dengan *sanitized environment* (bebas dari API key/token), batas memori (256MB), batas output (64KB), dan timeout ketat.
+4. **Self-Correction:** Jika terjadi kegagalan uji runtime atau pelanggaran AST, agen melakukan iterasi perbaikan mandiri hingga maksimal 3 kali.
+5. **Persetujuan Eksplisit Pengguna (Human-in-the-Loop):** Skill **TIDAK PERNAH** aktif secara otomatis. Pengguna menerima ringkasan izin dan hasil uji di chat Telegram.
+   - Ketik **`Ya`** untuk menyetujui dan mengaktifkan (berlaku 5 menit).
+   - Ketik **`Tidak`** untuk membatalkan.
+   - Ketik **`Lihat Kode`** untuk memeriksa seluruh kode sumber.
+6. **Versioning Git Lokal:** Setiap skill yang disetujui di-commit secara otomatis ke Git lokal `custom_skills/` dan dicatat ke log audit `custom_skills/audit.jsonl`.
+
+### 2. Struktur Modul Skill (`custom_skills/<nama_skill>/`)
+```
+custom_skills/<nama_skill>/
+├── manifest.json   # Metadata, parameter JSON schema, izin deklaratif, status
+├── main.py         # Entry point: def run(params: dict) -> dict
+├── tests.json      # Minimal 3 kasus uji (input -> expected output)
+└── CHANGELOG.md    # Catatan riwayat versi dan perubahan
+```
+
+---
+
+## 🔒 Batas Keamanan Terbuka (Known Limitations & Security Boundaries)
+
+Bekerja di lingkungan Android Termux tanpa root (*non-root*) memiliki batasan arsitektur fisik yang perlu dipahami secara transparan:
+
+1. **Ketiadaan Kernel Network Namespaces:**
+   - Tanpa root / `CAP_SYS_ADMIN`, Linux Android tidak mengizinkan pemanggilan `unshare(CLONE_NEWNET)`. Isolasi jaringan antar-proses ditegakkan pada tingkat aplikasi (AST static analyzer melarang modul `socket`, `urllib`, `requests` jika izin `network` kosong) dan verifikasi domain anti-SSRF, bukan firewall level kernel per-PID.
+2. **Batas Memori Virtual vs Native Heap:**
+   - `resource.setrlimit(RLIMIT_AS)` membatasi ruang alamat virtual, namun lonjakan alokasi memori drastis pada library native C dapat memicu *Low Memory Killer* (LMK) Android sebelum proses anak menerima sinyal SIGSEGV. Batas waktu eksekusi singkat (5–15 detik) dan pembatasan buffer output 64KB menjadi jaring pengaman utama.
+3. **Paket Eksternal (Pip):**
+   - Skill kustom dilarang melakukan instalasi paket pihak ketiga secara otomatis (`pip install`). Skill harus mengandalkan modul Python standar aman atau dependensi yang sudah terpasang.
+
+---
+
+## 🧭 Saran Langkah Pengembangan Berikutnya
+
+1. **Dashboard CLI Lokal:** Membuat perintah pembantu `python -m src.custom_skills.cli` untuk menginspeksi atau mengaudit skill langsung dari terminal Termux tanpa membuka Telegram.
+2. **Integrasi Root Execution Terpisah:** Untuk perangkat yang memiliki akses superuser (*rooted*), runner dapat diperluas dengan opsi isolasi namespace mount (`unshare -m`) untuk sandboxing filesystem tingkat kernel.
+3. **Penyimpanan Metrik Penggunaan:** Mencatat frekuensi pemanggilan tiap custom skill dan latensi rata-rata ke tabel SQLite untuk rekomendasi deprecation skill yang jarang digunakan.
+
+---
+
 ## 🧪 Pengujian Otomatis (Unit Testing)
 
-Repositori ini dilengkapi dengan 200 unit test otomatis yang mencakup keamanan path, routing intent, isolasi REPL, mitigasi SSRF, progressive streaming, dan dual-tier model:
+Repositori ini dilengkapi dengan 230 unit test otomatis yang mencakup keamanan path, routing intent, isolasi REPL, mitigasi SSRF, progressive streaming, dual-tier model, analisis statis AST, subprocess runner sandbox, dan pipeline custom skills:
 
 ```bash
 # Menjalankan seluruh test suite
@@ -184,11 +235,10 @@ pytest
 # Menjalankan dengan laporan detail (verbose)
 pytest -v
 
-# Menjalankan suite tertentu
-pytest tests/test_streaming.py -v
-pytest tests/test_model_selection.py -v
-pytest tests/test_tool_router.py -v
-pytest tests/test_path_security.py -v
+# Menjalankan suite custom skills
+pytest tests/test_custom_skills_foundation.py -v
+pytest tests/test_custom_skills_security_runner.py -v
+pytest tests/test_custom_skills_pipeline.py -v
 ```
 
 ---

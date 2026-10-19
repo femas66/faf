@@ -357,3 +357,133 @@ async def handle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "Pilihan tidak valid. Gunakan /mode auto, /mode fast, atau /mode smart."
         )
 
+
+@authorized_only
+async def handle_skills(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /skills: list all custom skills and their statuses."""
+    if not update.effective_message:
+        return
+
+    from src.custom_skills.registry import custom_skill_registry
+    skills = custom_skill_registry.get_all()
+    if not skills:
+        await update.effective_message.reply_text(
+            "Belum ada custom skill yang terdaftar di pustaka."
+        )
+        return
+
+    lines = ["Daftar Custom Skills:\n"]
+    for s in skills:
+        status_label = "AKTIF" if s.status == "active" else s.status.upper()
+        lines.append(f"• {s.name} (v{s.version}) [{status_label}]")
+        lines.append(f"  {s.description}")
+
+    lines.append("\nPerintah lanjutan:")
+    lines.append("• /skill_info <nama> - Lihat detail & izin skill")
+    lines.append("• /skill_disable <nama> - Nonaktifkan skill")
+    lines.append("• /skill_rollback <nama> - Kembalikan ke versi sebelumnya")
+
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+@authorized_only
+async def handle_skill_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /skill_info <name>: show detailed manifest & permissions."""
+    if not update.effective_message:
+        return
+
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text("Format: /skill_info <nama_skill>")
+        return
+
+    name = args[0].strip().lower()
+    from src.custom_skills.registry import custom_skill_registry
+    skill = custom_skill_registry.get_skill(name)
+    if not skill:
+        await update.effective_message.reply_text(f"Skill '{name}' tidak ditemukan.")
+        return
+
+    perms = skill.permissions
+    perm_lines = []
+    if perms.termux_api:
+        perm_lines.append(f"• Termux:API: {', '.join(perms.termux_api)}")
+    if perms.network:
+        perm_lines.append(f"• Network: {', '.join(perms.network)}")
+    if perms.fs_read:
+        perm_lines.append(f"• Baca File: {', '.join(perms.fs_read)}")
+    if perms.fs_write:
+        perm_lines.append(f"• Tulis File: {', '.join(perms.fs_write)}")
+    if perms.shell:
+        perm_lines.append("• Akses Shell: Ya (Sensitif)")
+    if not perm_lines:
+        perm_lines.append("• Tidak memerlukan izin khusus (Aman)")
+
+    info = (
+        f"Informasi Skill: {skill.name}\n\n"
+        f"• Versi: {skill.version}\n"
+        f"• Status: {skill.status.upper()}\n"
+        f"• Dibuat oleh: {skill.created_by}\n"
+        f"• Batas Waktu: {skill.timeout_sec} detik\n"
+        f"• Deskripsi: {skill.description}\n\n"
+        f"Izin yang Diberikan:\n" + "\n".join(perm_lines)
+    )
+    await update.effective_message.reply_text(info)
+
+
+@authorized_only
+async def handle_skill_disable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /skill_disable <name>: disable an active skill."""
+    if not update.effective_message:
+        return
+
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text("Format: /skill_disable <nama_skill>")
+        return
+
+    name = args[0].strip().lower()
+    from src.custom_skills.registry import custom_skill_registry
+    skill = custom_skill_registry.get_skill(name)
+    if not skill:
+        await update.effective_message.reply_text(f"Skill '{name}' tidak ditemukan.")
+        return
+
+    custom_skill_registry.update_status(name, "deprecated")
+    await update.effective_message.reply_text(
+        f"Skill '{name}' telah dinonaktifkan (status: DEPRECATED)."
+    )
+
+
+@authorized_only
+async def handle_skill_rollback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /skill_rollback <name>: rollback skill to previous git version."""
+    if not update.effective_message:
+        return
+
+    args = context.args or []
+    if not args:
+        await update.effective_message.reply_text("Format: /skill_rollback <nama_skill>")
+        return
+
+    name = args[0].strip().lower()
+    from src.custom_skills.git_store import skill_git_store
+    from src.custom_skills.registry import custom_skill_registry
+
+    skill = custom_skill_registry.get_skill(name)
+    if not skill:
+        await update.effective_message.reply_text(f"Skill '{name}' tidak ditemukan.")
+        return
+
+    success = await skill_git_store.rollback_skill(name)
+    if success:
+        custom_skill_registry.load_skills()
+        await update.effective_message.reply_text(
+            f"Skill '{name}' berhasil dikembalikan ke versi git sebelumnya (HEAD~1)."
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"Gagal melakukan rollback untuk skill '{name}'. Pastikan riwayat commit git tersedia."
+        )
+
+

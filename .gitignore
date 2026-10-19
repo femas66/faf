@@ -58,3 +58,8 @@ data/
 *.sqlite3
 *.lock
 
+# Custom skills runtime git and sandboxes
+custom_skills/.git/
+custom_skills/**/.sandbox/
+custom_skills/audit.jsonl
+*.jsonl
