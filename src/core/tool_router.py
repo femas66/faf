@@ -32,6 +32,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
         "file_manager",
         "pdf_manager",
         "code_to_image",
+        "media_downloader",
         "ask_clarification",
     },
     CATEGORY_WEB_MEDIA: {
@@ -109,12 +110,18 @@ FILE_KEYWORDS = {
     "baca file", "tulis file", "edit file", "hapus file", "cari file", "buat file",
     "simpan file", "salin file", "pindah file", "list file", "baca pdf", "cari teks",
     "/sdcard", "/data", "/storage", "~/", "documents", "download",
+    "downloadkan", "mendownload", "unduh", "mengunduh", "diunduh", "unduhkan",
+    "font", "fonts", "nerd font", "nerdfont", "jetbrains", "fira code", "hack font", "cascadia",
+    "huruf", "tipografi", "ttf", "otf", "woff", "arsip", "ekstrak",
 }
 
 WEB_MEDIA_KEYWORDS = {
     "cari web", "cari di web", "cari internet", "gugling", "googling", "riset",
     "web search", "search web", "browsing", "internet", "website", "url", "situs", "link", "tautan", "http", "https",
-    "download", "unduh", "video", "youtube", "yt", "tiktok", "instagram", "ig", "twitter", "x.com",
+    "download", "unduh", "downloadkan", "mendownload", "mengunduh", "diunduh", "unduhkan",
+    "unduh font", "download font", "downloadkan font",
+    "font", "fonts", "nerd font", "nerdfont", "jetbrains", "fira code", "hack font", "cascadia",
+    "huruf", "tipografi", "ttf", "otf", "video", "youtube", "yt", "tiktok", "instagram", "ig", "twitter", "x.com",
     "yt-dlp", "aria2", "torrent", "magnet", "mp3", "mp4",
     "screenshot", "screenshot web", "tangkapan layar", "tangkapan layar web", "web screenshot",
     "screenshot kode", "code to image", "code_to_image", "codesnap", "gambar kode", "teks jadi gambar",
@@ -153,6 +160,8 @@ def _matches_any_keyword(text: str, keywords: set[str]) -> bool:
             if kw in text:
                 return True
         else:
+            if re.search(rf"\b(meng|peng|men|pen|me|di|pe|ter)?{re.escape(kw)}(kan|i|an|nya)?\b", text):
+                return True
             if re.search(rf"\b{re.escape(kw)}\b", text):
                 return True
     return False

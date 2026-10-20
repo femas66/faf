@@ -9,6 +9,8 @@ import pathlib
 import re
 import shutil
 import stat
+import tarfile
+import zipfile
 from typing import Any
 
 from src.core.permissions import permission_manager
@@ -109,6 +111,7 @@ class FileManagerTool(BaseTool):
                     "make_dir",
                     "checksum",
                     "tree",
+                    "extract_archive",
                 ],
                 "description": (
                     "Aksi operasi berkas yang diinginkan: "
@@ -126,7 +129,8 @@ class FileManagerTool(BaseTool):
                     "'move' (pindahkan atau ganti nama file/folder), "
                     "'make_dir' (buat folder baru beserta induknya jika belum ada), "
                     "'checksum' (hitung hash MD5, SHA1, SHA256 file), "
-                    "'tree' (tampilkan struktur pohon direktori hierarkis)."
+                    "'tree' (tampilkan struktur pohon direktori hierarkis), "
+                    "'extract_archive' (ekstrak file arsip .zip / .tar.xz / .tar.gz ke destination_path)."
                 ),
             },
             "path": {
@@ -1161,6 +1165,76 @@ class FileManagerTool(BaseTool):
             lines_out.append(f"Total: {dir_count} direktori, {file_count} berkas terdaftar.")
             return ToolResult(success=True, output="\n".join(lines_out))
 
+        # -------------------------------------------------------------------
+        # 16. Action: EXTRACT_ARCHIVE (Safely extract zip/tar archives)
+        # -------------------------------------------------------------------
+        elif action == "extract_archive":
+            archive_path = target_path or source_path
+            if not archive_path:
+                return ToolResult(success=False, output="", error="Parameter 'path' wajib diisi untuk aksi extract_archive.")
+
+            if not os.path.exists(archive_path):
+                return ToolResult(success=False, output="", error=f"Berkas arsip tidak ditemukan: {archive_path}")
+
+            out_dir = dest_path or kwargs.get("output_dir") or os.getcwd()
+            out_dir = os.path.abspath(os.path.expanduser(out_dir))
+            os.makedirs(out_dir, exist_ok=True)
+
+            try:
+                extracted = []
+                ext_l = archive_path.lower()
+                if ext_l.endswith(".zip"):
+                    with zipfile.ZipFile(archive_path, "r") as z:
+                        for m in z.infolist():
+                            if m.is_dir():
+                                continue
+                            clean_rel = os.path.normpath(m.filename).lstrip("/\\")
+                            if ".." in clean_rel.split(os.sep):
+                                continue
+                            dest = os.path.abspath(os.path.join(out_dir, clean_rel))
+                            if not dest.startswith(out_dir):
+                                continue
+                            os.makedirs(os.path.dirname(dest), exist_ok=True)
+                            with z.open(m) as src, open(dest, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                            extracted.append(dest)
+                elif ext_l.endswith((".tar.xz", ".tar.gz", ".tar.bz2", ".tar", ".tgz")):
+                    with tarfile.open(archive_path, "r:*") as t:
+                        for m in t.getmembers():
+                            if not m.isfile():
+                                continue
+                            clean_rel = os.path.normpath(m.name).lstrip("/\\")
+                            if ".." in clean_rel.split(os.sep):
+                                continue
+                            dest = os.path.abspath(os.path.join(out_dir, clean_rel))
+                            if not dest.startswith(out_dir):
+                                continue
+                            os.makedirs(os.path.dirname(dest), exist_ok=True)
+                            fobj = t.extractfile(m)
+                            if fobj:
+                                with open(dest, "wb") as dst:
+                                    shutil.copyfileobj(fobj, dst)
+                                extracted.append(dest)
+                else:
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error=f"Format arsip '{archive_path}' tidak didukung. Didukung: .zip, .tar.xz, .tar.gz, .tar.bz2, .tar",
+                    )
+
+                rel_target = os.path.relpath(out_dir, os.getcwd()) if out_dir.startswith(os.getcwd()) else out_dir
+                return ToolResult(
+                    success=True,
+                    output=(
+                        f"Ekstraksi Arsip Selesai: {os.path.basename(archive_path)}\n\n"
+                        f"• Direktori Tujuan: {rel_target}\n"
+                        f"• Total Berkas Diekstrak: {len(extracted)} berkas\n"
+                        f"• Status: Berhasil diekstrak."
+                    ),
+                )
+            except Exception as e:
+                return ToolResult(success=False, output="", error=f"Gagal mengekstrak arsip: {e}")
+
         else:
             return ToolResult(
                 success=False,
@@ -1168,6 +1242,6 @@ class FileManagerTool(BaseTool):
                 error=(
                     f"Aksi '{action}' tidak dikenal. Aksi yang didukung: read, write, append, "
                     f"edit_lines, insert_lines, find_replace, delete, file_info, list_dir, "
-                    f"search_text, copy, move, make_dir, checksum, tree."
+                    f"search_text, copy, move, make_dir, checksum, tree, extract_archive."
                 ),
             )

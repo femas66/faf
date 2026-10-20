@@ -8,10 +8,12 @@ import os
 import re
 import shlex
 import shutil
+import tarfile
 import tempfile
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from typing import Any
 
 from src.config import get_settings
@@ -93,7 +95,7 @@ def _resolve_download_dir(custom_dir: str | None = None) -> str:
     """Resolve a writable download directory on Android / Termux / Linux."""
     candidates: list[str] = []
     if custom_dir:
-        candidates.append(os.path.abspath(custom_dir))
+        candidates.append(os.path.abspath(os.path.expanduser(custom_dir)))
 
     candidates.extend([
         "/sdcard/Download",
@@ -132,18 +134,206 @@ def _sanitize_filename(name: str) -> str:
     return clean or f"download_{int(time.time())}"
 
 
+# Mapping of normalized font names to their official Nerd Fonts release asset name
+POPULAR_NERD_FONTS: dict[str, str] = {
+    "jetbrains mono": "JetBrainsMono",
+    "jetbrains": "JetBrainsMono",
+    "jetbrainsmono": "JetBrainsMono",
+    "fira code": "FiraCode",
+    "firacode": "FiraCode",
+    "fira": "FiraCode",
+    "hack": "Hack",
+    "cascadia code": "CascadiaCode",
+    "cascadiacode": "CascadiaCode",
+    "cascadia mono": "CascadiaMono",
+    "cascadiamono": "CascadiaMono",
+    "cascadia": "CascadiaCode",
+    "meslo": "Meslo",
+    "meslo lg": "Meslo",
+    "source code pro": "SourceCodePro",
+    "sourcecodepro": "SourceCodePro",
+    "source code": "SourceCodePro",
+    "dejavu sans mono": "DejaVuSansMono",
+    "dejavusansmono": "DejaVuSansMono",
+    "dejavu": "DejaVuSansMono",
+    "ubuntu mono": "UbuntuMono",
+    "ubuntumono": "UbuntuMono",
+    "ubuntu": "Ubuntu",
+    "inconsolata": "Inconsolata",
+    "droid sans mono": "DroidSansMono",
+    "droidsansmono": "DroidSansMono",
+    "droid sans": "DroidSansMono",
+    "victor mono": "VictorMono",
+    "victormono": "VictorMono",
+    "victor": "VictorMono",
+    "mononoki": "Mononoki",
+    "terminus": "Terminus",
+    "iosevka": "Iosevka",
+    "commit mono": "CommitMono",
+    "commitmono": "CommitMono",
+    "geist mono": "GeistMono",
+    "geistmono": "GeistMono",
+    "geist": "GeistMono",
+    "roboto mono": "RobotoMono",
+    "robotomono": "RobotoMono",
+    "roboto": "RobotoMono",
+    "space mono": "SpaceMono",
+    "spacemono": "SpaceMono",
+    "ibm plex mono": "IBMPlexMono",
+    "ibmplexmono": "IBMPlexMono",
+    "ibm plex": "IBMPlexMono",
+    "intel one mono": "IntelOneMono",
+    "intelonemono": "IntelOneMono",
+    "intel one": "IntelOneMono",
+    "go mono": "Go-Mono",
+    "gomono": "Go-Mono",
+    "go-mono": "Go-Mono",
+    "anonymous pro": "AnonymousPro",
+    "agave": "Agave",
+    "bigblue terminal": "BigBlueTerminal",
+    "bigblueterminal": "BigBlueTerminal",
+    "code new roman": "CodeNewRoman",
+    "cousine": "Cousine",
+    "daddytime mono": "DaddyTimeMono",
+    "fantasque sans mono": "FantasqueSansMono",
+    "hasklig": "Hasklig",
+    "heavy data": "HeavyData",
+    "hermit": "Hermit",
+    "liberation mono": "LiberationMono",
+    "monofur": "Monofur",
+    "monoid": "Monoid",
+    "noto": "Noto",
+    "overpass": "Overpass",
+    "profont": "ProFont",
+    "share tech mono": "ShareTechMono",
+    "tinos": "Tinos",
+}
+
+
+def _resolve_font_asset(font_name: str) -> tuple[str, str]:
+    """Resolve font name to release asset name and download URL.
+
+    Returns:
+        (display_title, download_url)
+    """
+    raw = font_name.strip()
+    norm = raw.lower()
+    for drop in ["nerd font", "nerdfont", "nerd", "font", "fonts"]:
+        norm = norm.replace(drop, "")
+    norm = re.sub(r"[\-_]+", " ", norm).strip()
+    norm = re.sub(r"\s+", " ", norm)
+
+    asset_name = POPULAR_NERD_FONTS.get(norm)
+    if not asset_name:
+        no_space = norm.replace(" ", "")
+        asset_name = POPULAR_NERD_FONTS.get(no_space)
+
+    if not asset_name:
+        words = [w.capitalize() for w in norm.split()]
+        asset_name = "".join(words) or "JetBrainsMono"
+
+    url = f"https://github.com/ryanoasis/nerd-fonts/releases/latest/download/{asset_name}.tar.xz"
+    display_title = f"{asset_name} (Nerd Font)"
+    return display_title, url
+
+
+def _safe_extract_archive(
+    archive_path: str,
+    target_dir: str,
+    font_only: bool = False,
+) -> list[str]:
+    """Safely extract archive members preventing directory traversal (Zip Slip / Tar Slip).
+
+    If font_only is True, flattens all .ttf and .otf font files directly into target_dir.
+    """
+    target_abs = os.path.abspath(os.path.expanduser(target_dir))
+    os.makedirs(target_abs, exist_ok=True)
+    extracted: list[str] = []
+    ext_lower = archive_path.lower()
+
+    if ext_lower.endswith(".zip"):
+        with zipfile.ZipFile(archive_path, "r") as z:
+            for member in z.infolist():
+                if member.is_dir():
+                    continue
+                clean_rel = os.path.normpath(member.filename).lstrip("/\\")
+                if ".." in clean_rel.split(os.sep):
+                    continue
+
+                clean_name = os.path.basename(clean_rel)
+                if not clean_name or clean_name.startswith("."):
+                    continue
+
+                if font_only:
+                    if not clean_name.lower().endswith((".ttf", ".otf", ".woff", ".woff2")):
+                        continue
+                    dest = os.path.abspath(os.path.join(target_abs, clean_name))
+                else:
+                    dest = os.path.abspath(os.path.join(target_abs, clean_rel))
+
+                if not (dest == target_abs or dest.startswith(target_abs + os.sep)):
+                    continue
+
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with z.open(member) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted.append(dest)
+
+    elif ext_lower.endswith((".tar.xz", ".tar.gz", ".tar.bz2", ".tar", ".tgz")):
+        with tarfile.open(archive_path, "r:*") as t:
+            for member in t.getmembers():
+                if not member.isfile():
+                    continue
+                clean_rel = os.path.normpath(member.name).lstrip("/\\")
+                if ".." in clean_rel.split(os.sep):
+                    continue
+
+                clean_name = os.path.basename(clean_rel)
+                if not clean_name or clean_name.startswith("."):
+                    continue
+
+                if font_only:
+                    if not clean_name.lower().endswith((".ttf", ".otf", ".woff", ".woff2")):
+                        continue
+                    dest = os.path.abspath(os.path.join(target_abs, clean_name))
+                else:
+                    dest = os.path.abspath(os.path.join(target_abs, clean_rel))
+
+                if not (dest == target_abs or dest.startswith(target_abs + os.sep)):
+                    continue
+
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                fobj = t.extractfile(member)
+                if fobj:
+                    with open(dest, "wb") as dst:
+                        shutil.copyfileobj(fobj, dst)
+                    extracted.append(dest)
+
+    elif ext_lower.endswith((".ttf", ".otf", ".woff", ".woff2")):
+        clean_name = os.path.basename(archive_path)
+        dest = os.path.join(target_abs, clean_name)
+        shutil.copy2(archive_path, dest)
+        extracted.append(dest)
+
+    return extracted
+
+
 class MediaDownloaderTool(BaseTool):
     """Complex multi-engine media and file downloader for Android Termux.
 
     Supports direct downloads, social media/video extraction (yt-dlp),
-    multi-connection acceleration (aria2c), audio extraction, metadata inspection,
-    torrent/magnet, and automatic Telegram dispatch.
+    multi-connection acceleration (aria2c), font downloading and installation
+    (JetBrains Mono, Fira Code, Nerd Fonts), archive extraction, audio extraction,
+    metadata inspection, torrent/magnet, and automatic Telegram dispatch.
     """
 
     name = "media_downloader"
     description = (
-        "Tool pengunduh media dan berkas serbaguna tingkat lanjut (multi-engine downloader). "
-        "Mendukung pengunduhan berkas langsung (HTTP/HTTPS via aria2c/curl/wget/Python native dengan akselerasi multi-thread), "
+        "Tool pengunduh media, berkas, dan font serbaguna tingkat lanjut (multi-engine downloader). "
+        "Mendukung pengunduhan berkas langsung dari web (HTTP/HTTPS via aria2c/curl/wget/Python native dengan akselerasi multi-thread), "
+        "pengunduhan dan instalasi font pemrograman/Nerd Fonts (seperti JetBrains Mono Nerd Font, Fira Code, Hack, Cascadia Code, Meslo, dll.) "
+        "secara otomatis ke folder tujuan (misal '.fonts/') beserta ekstraksi file .ttf/.otf, "
+        "ekstraksi berkas arsip (.zip, .tar.xz, .tar.gz), "
         "ekstraksi video dan audio media sosial (YouTube, TikTok, Instagram, Twitter/X, SoundCloud, dll. via yt-dlp), "
         "konversi/ekstraksi MP3 audio, inspeksi metadata URL sebelum mengunduh (info judul, durasi, ukuran), "
         "unduhan batch banyak tautan sekaligus, unduhan torrent/magnet, serta riwayat berkas unduhan di Android (/sdcard/Download). "
@@ -156,6 +346,8 @@ class MediaDownloaderTool(BaseTool):
                 "type": "string",
                 "enum": [
                     "download",
+                    "download_font",
+                    "extract_archive",
                     "extract_audio",
                     "info",
                     "batch_download",
@@ -164,7 +356,10 @@ class MediaDownloaderTool(BaseTool):
                     "check_environment",
                 ],
                 "description": (
-                    "Aksi yang diinginkan: 'download' (unduh berkas langsung atau video media sosial), "
+                    "Aksi yang diinginkan: "
+                    "'download' (unduh berkas langsung dari URL atau video/audio media sosial), "
+                    "'download_font' (unduh dan pasang font seperti JetBrains Mono Nerd Font ke folder .fonts/), "
+                    "'extract_archive' (ekstrak berkas arsip .zip / .tar.xz / .tar.gz ke folder tujuan), "
                     "'extract_audio' (unduh dan ekstrak audio sebagai MP3/M4A), "
                     "'info' (inspeksi metadata URL tanpa mengunduh), "
                     "'batch_download' (unduh banyak tautan sekaligus), "
@@ -173,6 +368,14 @@ class MediaDownloaderTool(BaseTool):
                     "'check_environment' (cek kesiapan engine yt-dlp, aria2c, ffmpeg, curl di Termux)."
                 ),
                 "default": "download",
+            },
+            "font_name": {
+                "type": "string",
+                "description": (
+                    "Nama font yang ingin diunduh (contoh: 'jetbrains mono', 'jetbrains mono nerd font', "
+                    "'fira code', 'hack', 'cascadia code', 'meslo', dll.). Otomatis mencari dan mengunduh "
+                    "rilis resmi Nerd Fonts lalu mengekstrak berkas .ttf/.otf ke folder tujuan (default: '.fonts/')."
+                ),
             },
             "url": {
                 "type": "string",
@@ -191,7 +394,11 @@ class MediaDownloaderTool(BaseTool):
             },
             "output_dir": {
                 "type": "string",
-                "description": "Direktori penyimpanan di perangkat (default: '/sdcard/Download').",
+                "description": "Direktori penyimpanan di perangkat (contoh: '.fonts/', '/sdcard/Download', '~/.fonts').",
+            },
+            "extract": {
+                "type": "boolean",
+                "description": "Setel True untuk mengekstrak isi berkas arsip (.zip, .tar.xz, .tar.gz) ke output_dir setelah selesai diunduh. Otomatis True jika mengunduh font.",
             },
             "filename": {
                 "type": "string",
@@ -199,7 +406,7 @@ class MediaDownloaderTool(BaseTool):
             },
             "send_to_telegram": {
                 "type": "boolean",
-                "description": "Kirimkan berkas ke obrolan Telegram jika ukurannya <= 50MB (default: True).",
+                "description": "Kirimkan berkas ke obrolan Telegram jika ukurannya <= 50MB (default: True, otomatis False untuk font).",
                 "default": True,
             },
             "accelerated": {
@@ -223,6 +430,19 @@ class MediaDownloaderTool(BaseTool):
 
     async def execute(self, context: ToolContext, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action", "download").lower().strip()
+        font_name = kwargs.get("font_name", "").strip()
+
+        # -------------------------------------------------------------------
+        # 0. Action: DOWNLOAD_FONT (Direct font download & installation)
+        # -------------------------------------------------------------------
+        if action == "download_font" or font_name:
+            return await self._action_download_font(context, kwargs)
+
+        # -------------------------------------------------------------------
+        # 0b. Action: EXTRACT_ARCHIVE
+        # -------------------------------------------------------------------
+        if action == "extract_archive":
+            return await self._action_extract_archive(context, kwargs)
 
         # -------------------------------------------------------------------
         # 1. Action: CHECK_ENVIRONMENT
@@ -674,35 +894,157 @@ class MediaDownloaderTool(BaseTool):
                 )
             return ToolResult(success=True, output="\n".join(out_lines))
 
-    async def _download_direct(
+    async def _action_download_font(
+        self, context: ToolContext, kwargs: dict[str, Any]
+    ) -> ToolResult:
+        """Download and install fonts (e.g. JetBrains Mono Nerd Font, Fira Code) into target dir."""
+        font_name = kwargs.get("font_name", "").strip()
+        raw_url = kwargs.get("url", "").strip()
+
+        if not font_name and not raw_url:
+            return ToolResult(
+                success=False,
+                output="",
+                error=(
+                    "Parameter 'font_name' atau 'url' wajib disertakan untuk mengunduh font.\n"
+                    "Contoh font_name: 'jetbrains mono nerd font', 'fira code', 'hack', 'cascadia code'."
+                ),
+            )
+
+        if raw_url:
+            url = raw_url
+            display_title = font_name or os.path.splitext(os.path.basename(url))[0]
+        else:
+            display_title, url = _resolve_font_asset(font_name)
+
+        # Proteksi SSRF & Validasi Keamanan URL
+        is_safe, safety_msg, _ = _check_url_safety(url, check_dangerous_extensions=False)
+        if not is_safe:
+            return ToolResult(success=False, output="", error=f"Akses ditolak: {safety_msg}")
+
+        # Target directory: default to ".fonts"
+        custom_out = kwargs.get("output_dir", "").strip()
+        if not custom_out:
+            target_dir = os.path.abspath(".fonts")
+        else:
+            target_dir = os.path.abspath(os.path.expanduser(custom_out))
+
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except Exception as e:
+            return ToolResult(success=False, output="", error=f"Gagal membuat folder tujuan '{target_dir}': {e}")
+
+        timeout = min(600, max(30, kwargs.get("timeout_seconds", 300)))
+
+        if context.on_status_update:
+            await context.on_status_update(f"● media_downloader · mengunduh {display_title}...")
+
+        # Download archive to temporary directory
+        with tempfile.TemporaryDirectory(prefix="faf_font_dl_") as tmp_dir:
+            parsed = urllib.parse.urlparse(url)
+            base_fname = os.path.basename(parsed.path) or "font_archive.tar.xz"
+            temp_archive_path = os.path.join(tmp_dir, base_fname)
+
+            # Download using multi-engine downloader
+            dl_res = await self._download_file_to(url, temp_archive_path, timeout, kwargs)
+            if not dl_res.get("success"):
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal mengunduh berkas font dari {url}: {dl_res.get('error', 'Error unduh')}",
+                )
+
+            if context.on_status_update:
+                rel_target = os.path.relpath(target_dir, os.getcwd()) if target_dir.startswith(os.getcwd()) else target_dir
+                await context.on_status_update(f"● media_downloader · mengekstrak font ke {rel_target}...")
+
+            # Extract font files (.ttf/.otf)
+            try:
+                extracted = _safe_extract_archive(temp_archive_path, target_dir, font_only=True)
+            except Exception as e:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal mengekstrak berkas font dari arsip: {e}",
+                )
+
+        if not extracted:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Tidak ditemukan berkas font (.ttf / .otf) di dalam arsip yang diunduh dari {url}.",
+            )
+
+        # Build clean plain-text response (friendly, no markdown tables, no bold)
+        rel_target = os.path.relpath(target_dir, os.getcwd()) if target_dir.startswith(os.getcwd()) else target_dir
+        total_size = sum(os.path.getsize(p) for p in extracted if os.path.exists(p))
+        sample_files = [os.path.basename(p) for p in extracted[:5]]
+
+        out_lines = [
+            "Pengunduhan dan Pemasangan Font Selesai\n",
+            f"• Nama Font: {display_title}",
+            f"• Lokasi Folder: {rel_target}",
+            f"• Jumlah Berkas Font: {len(extracted)} file (.ttf / .otf)",
+            f"• Ukuran Total: {_format_size(total_size)}",
+            "• Contoh Berkas:",
+        ]
+        for sf in sample_files:
+            out_lines.append(f"  - {sf}")
+        if len(extracted) > len(sample_files):
+            out_lines.append(f"  (dan {len(extracted) - len(sample_files)} varian lainnya)")
+
+        out_lines.append(
+            "\n• Status: Berkas font berhasil dipasang dan siap digunakan untuk "
+            "pembuatan screenshot kode (code_to_image) maupun aplikasi terminal Termux."
+        )
+
+        return ToolResult(success=True, output="\n".join(out_lines))
+
+    async def _action_extract_archive(
+        self, context: ToolContext, kwargs: dict[str, Any]
+    ) -> ToolResult:
+        """Extract an archive file (.zip, .tar.xz, .tar.gz) into destination directory."""
+        archive_path = kwargs.get("path") or kwargs.get("filename") or kwargs.get("url") or ""
+        archive_path = archive_path.strip()
+        if not archive_path or not os.path.isfile(archive_path):
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Berkas arsip '{archive_path}' tidak ditemukan di sistem.",
+            )
+
+        target_dir = os.path.abspath(os.path.expanduser(kwargs.get("output_dir") or "."))
+        os.makedirs(target_dir, exist_ok=True)
+
+        try:
+            extracted = _safe_extract_archive(archive_path, target_dir, font_only=False)
+            rel_target = os.path.relpath(target_dir, os.getcwd()) if target_dir.startswith(os.getcwd()) else target_dir
+            out = (
+                f"Ekstraksi Arsip Selesai\n\n"
+                f"• Berkas Arsip: {os.path.basename(archive_path)}\n"
+                f"• Direktori Tujuan: {rel_target}\n"
+                f"• Total Berkas Diekstrak: {len(extracted)} berkas\n"
+                f"• Status: Berhasil diekstrak."
+            )
+            return ToolResult(success=True, output=out)
+        except Exception as e:
+            return ToolResult(success=False, output="", error=f"Gagal mengekstrak arsip: {e}")
+
+    async def _download_file_to(
         self,
         url: str,
-        output_dir: str,
+        dest_path: str,
         timeout: int,
-        send_telegram: bool,
-        context: ToolContext,
         kwargs: dict[str, Any],
-    ) -> ToolResult:
-        """Download file directly using aria2c, curl, wget, or native Python fallback."""
+    ) -> dict[str, Any]:
+        """Download file directly to dest_path using aria2c, curl, wget, or native Python fallback."""
         engines = _get_installed_engines()
         accelerated = kwargs.get("accelerated", True)
         max_conn = max(1, min(16, kwargs.get("max_connections", 8)))
+        output_dir = os.path.dirname(dest_path)
+        final_filename = os.path.basename(dest_path)
 
-        # Determine target filename
-        custom_name = kwargs.get("filename")
-        if custom_name:
-            final_filename = _sanitize_filename(custom_name)
-        else:
-            parsed = urllib.parse.urlparse(url)
-            base = os.path.basename(parsed.path)
-            final_filename = _sanitize_filename(base) if base else f"download_{int(time.time())}.bin"
-
-        dest_path = os.path.join(output_dir, final_filename)
-
-        if context.on_status_update:
-            await context.on_status_update(f"● media_downloader · mengunduh {final_filename}...")
-
-        # 1. Engine: aria2c (Accelerated multi-connection)
+        # 1. aria2c
         if accelerated and engines.get("aria2c"):
             aria_bin = engines["aria2c"]
             cmd = (
@@ -712,9 +1054,9 @@ class MediaDownloaderTool(BaseTool):
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
             if res.success and os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
-                return self._build_direct_success(dest_path, "aria2c (multi-thread)", send_telegram)
+                return {"success": True, "engine": "aria2c (multi-thread)", "path": dest_path}
 
-        # 2. Engine: curl
+        # 2. curl
         if engines.get("curl"):
             curl_bin = engines["curl"]
             cmd = (
@@ -723,9 +1065,9 @@ class MediaDownloaderTool(BaseTool):
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
             if res.success and os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
-                return self._build_direct_success(dest_path, "curl", send_telegram)
+                return {"success": True, "engine": "curl", "path": dest_path}
 
-        # 3. Engine: wget
+        # 3. wget
         if engines.get("wget"):
             wget_bin = engines["wget"]
             cmd = (
@@ -734,9 +1076,9 @@ class MediaDownloaderTool(BaseTool):
             )
             res = await bridge.execute_shell(cmd, timeout=timeout)
             if res.success and os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
-                return self._build_direct_success(dest_path, "wget", send_telegram)
+                return {"success": True, "engine": "wget", "path": dest_path}
 
-        # 4. Engine: Native Python Async Chunk Downloader
+        # 4. Native Python Async Chunk Downloader
         try:
             loop = asyncio.get_running_loop()
 
@@ -758,19 +1100,89 @@ class MediaDownloaderTool(BaseTool):
 
             await loop.run_in_executor(None, _native_download)
             if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
-                return self._build_direct_success(dest_path, "Python Native Stream", send_telegram)
+                return {"success": True, "engine": "Python Native Stream", "path": dest_path}
         except Exception as e:
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Gagal mengunduh berkas dari {url}: {e}",
-            )
+            return {"success": False, "error": str(e)}
+
+        return {"success": False, "error": "Tidak ada mesin unduh yang berhasil."}
+
+    async def _download_direct(
+        self,
+        url: str,
+        output_dir: str,
+        timeout: int,
+        send_telegram: bool,
+        context: ToolContext,
+        kwargs: dict[str, Any],
+    ) -> ToolResult:
+        """Download file directly using aria2c, curl, wget, or native Python fallback."""
+        # Determine target filename
+        custom_name = kwargs.get("filename")
+        if custom_name:
+            final_filename = _sanitize_filename(custom_name)
+        else:
+            parsed = urllib.parse.urlparse(url)
+            base = os.path.basename(parsed.path)
+            final_filename = _sanitize_filename(base) if base else f"download_{int(time.time())}.bin"
+
+        dest_path = os.path.join(output_dir, final_filename)
+
+        if context.on_status_update:
+            await context.on_status_update(f"● media_downloader · mengunduh {final_filename}...")
+
+        dl_res = await self._download_file_to(url, dest_path, timeout, kwargs)
+        if dl_res.get("success"):
+            # Check if auto-extraction is requested
+            should_extract = kwargs.get("extract", False)
+            if not should_extract and ("font" in output_dir.lower() or output_dir.endswith(".fonts")):
+                if dest_path.lower().endswith((".zip", ".tar.xz", ".tar.gz", ".tar.bz2", ".tar", ".tgz")):
+                    should_extract = True
+
+            if should_extract and dest_path.lower().endswith((".zip", ".tar.xz", ".tar.gz", ".tar.bz2", ".tar", ".tgz")):
+                try:
+                    font_mode = "font" in output_dir.lower() or output_dir.endswith(".fonts")
+                    extracted = _safe_extract_archive(dest_path, output_dir, font_only=font_mode)
+                    return self._build_extract_success(dest_path, output_dir, extracted, dl_res.get("engine", "direct"))
+                except Exception as ex:
+                    logger.warning(f"Failed to auto-extract archive {dest_path}: {ex}")
+
+            return self._build_direct_success(dest_path, dl_res.get("engine", "direct"), send_telegram)
 
         return ToolResult(
             success=False,
             output="",
-            error=f"Gagal mengunduh berkas dari {url}: Tidak ada mesin unduh yang berhasil.",
+            error=f"Gagal mengunduh berkas dari {url}: {dl_res.get('error', 'Tidak ada mesin unduh yang berhasil.')}",
         )
+
+    def _build_extract_success(
+        self,
+        dest_path: str,
+        target_dir: str,
+        extracted: list[str],
+        engine_used: str,
+    ) -> ToolResult:
+        """Construct success ToolResult for extracted archive."""
+        fname = os.path.basename(dest_path)
+        archive_size = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+        rel_target = os.path.relpath(target_dir, os.getcwd()) if target_dir.startswith(os.getcwd()) else target_dir
+        samples = [os.path.basename(p) for p in extracted[:5]]
+
+        out_lines = [
+            "Pengunduhan dan Ekstraksi Berkas Selesai\n",
+            f"• Nama Berkas Arsip: {fname}",
+            f"• Ukuran Arsip: {_format_size(archive_size)}",
+            f"• Mesin Unduh: {engine_used}",
+            f"• Lokasi Ekstraksi: {rel_target}",
+            f"• Total Berkas Diekstrak: {len(extracted)} berkas",
+            "• Contoh Berkas:",
+        ]
+        for s in samples:
+            out_lines.append(f"  - {s}")
+        if len(extracted) > len(samples):
+            out_lines.append(f"  (dan {len(extracted) - len(samples)} berkas lainnya)")
+
+        out_lines.append("\n• Status: Semua berkas berhasil diekstrak dan tersimpan aman di perangkat.")
+        return ToolResult(success=True, output="\n".join(out_lines))
 
     def _build_direct_success(self, dest_path: str, engine_used: str, send_telegram: bool) -> ToolResult:
         """Construct success ToolResult for direct download."""
