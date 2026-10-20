@@ -203,6 +203,57 @@ def test_render_ipynb_notebook(tmp_path):
     assert os.path.isfile(saved)
 
 
+def test_render_multiple_programming_languages(tmp_path):
+    """Verify rendering across major requested languages: Go, PHP, HTML, JS, TS, Bash, SQL, CSS, JSON."""
+    test_cases = [
+        ("golang", "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"Golang\") }", "main.go"),
+        ("php", "$user = User::find(1);\necho $user->name;", "index.php"),
+        ("html", "<!DOCTYPE html>\n<html><body><h1>Title</h1></body></html>", "index.html"),
+        ("js", "const greet = (name) => `Hello, ${name}!`;", "app.js"),
+        ("ts", "interface Item { id: number; name: string; }\nconst x: Item = { id: 1, name: 'A' };", "app.ts"),
+        ("bash", "#!/bin/bash\nfor f in *.txt; do echo \"File: $f\"; done", "script.sh"),
+        ("sql", "SELECT u.id, u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 100;", "query.sql"),
+        ("css", ".card { display: flex; padding: 1rem; border-radius: 8px; background: #1E1E1E; }", "style.css"),
+        ("json", '{\n  "status": "success",\n  "count": 42,\n  "data": [1, 2, 3]\n}', "data.json"),
+        ("rust", "fn main() {\n    let msg = \"Hello Rust!\";\n    println!(\"{}\", msg);\n}", "main.rs"),
+    ]
+
+    for lang, snippet, default_name in test_cases:
+        out_f = str(tmp_path / f"test_{lang}.png")
+        saved = render_code_to_image(
+            code=snippet,
+            output_path=out_f,
+            lang=lang,
+            name=default_name,
+            frame="tab",
+        )
+        assert os.path.isfile(saved), f"Failed rendering language {lang}"
+        with Image.open(saved) as im:
+            assert im.format == "PNG"
+            assert im.width > 200
+            assert im.height > 50
+
+
+def test_php_lexer_without_opening_tag():
+    """Verify PHP snippets without <?php tag are properly highlighted."""
+    lex = resolve_lexer("php", "test.php", "$user = new User(); echo $user->id;")
+    tokens = list(lex.get_tokens("$user = new User(); echo $user->id;"))
+    # Token.Name.Variable should be detected for $user
+    token_types = [str(t[0]) for t in tokens]
+    assert any("Token.Name.Variable" in tt for tt in token_types)
+
+
+def test_filename_inference_from_language():
+    """Verify filename is automatically inferred from lang if not provided."""
+    from code_to_image import DEFAULT_FILENAMES_PER_LANG
+    assert DEFAULT_FILENAMES_PER_LANG["golang"] == "main.go"
+    assert DEFAULT_FILENAMES_PER_LANG["sql"] == "query.sql"
+    assert DEFAULT_FILENAMES_PER_LANG["php"] == "index.php"
+    assert DEFAULT_FILENAMES_PER_LANG["html"] == "index.html"
+    assert DEFAULT_FILENAMES_PER_LANG["bash"] == "script.sh"
+    assert DEFAULT_FILENAMES_PER_LANG["ts"] == "app.ts"
+
+
 # ------------------------------------------------------------------------------
 # 3. CodeToImageTool Execution & Security Tests
 # ------------------------------------------------------------------------------

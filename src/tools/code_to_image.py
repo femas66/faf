@@ -162,8 +162,13 @@ class CodeToImageTool(BaseTool):
         else:
             code_content = str(text_input)
 
+        lang = kwargs.get("lang")
         if not filename:
-            filename = "main.py"
+            from code_to_image import DEFAULT_FILENAMES_PER_LANG
+            if lang and lang.lower().strip() in DEFAULT_FILENAMES_PER_LANG:
+                filename = DEFAULT_FILENAMES_PER_LANG[lang.lower().strip()]
+            else:
+                filename = "main.py"
         if not breadcrumb_path:
             breadcrumb_path = filename
 

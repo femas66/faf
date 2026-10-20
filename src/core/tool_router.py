@@ -105,6 +105,7 @@ SYSTEM_KEYWORDS = {
 FILE_KEYWORDS = {
     "file", "berkas", "folder", "direktori", "directory", "path", "dokumen",
     "txt", "log", "csv", "json", "xml", "zip", "tar", "gz", "pdf", "ipynb", "notebook", "jupyter",
+    "py", "go", "php", "sql", "html", "css", "js", "ts", "sh", "rs", "cpp", "java",
     "baca file", "tulis file", "edit file", "hapus file", "cari file", "buat file",
     "simpan file", "salin file", "pindah file", "list file", "baca pdf", "cari teks",
     "/sdcard", "/data", "/storage", "~/", "documents", "download",
@@ -118,6 +119,7 @@ WEB_MEDIA_KEYWORDS = {
     "screenshot", "screenshot web", "tangkapan layar", "tangkapan layar web", "web screenshot",
     "screenshot kode", "code to image", "code_to_image", "codesnap", "gambar kode", "teks jadi gambar",
     "vscode", "vs code", "dark+", "render kode", "render gambar", "ubah jadi gambar", "jadikan gambar",
+    "golang", "php", "sql", "html", "bash", "typescript", "javascript",
     "ocr", "ekstrak teks", "baca gambar", "tesseract", "scan teks", "foto dokumen",
     "musik", "lagu", "play", "pause", "kamera", "foto", "fotonya", "gambar", "gambarnya", "jepret",
     "rekam suara", "mikrofon", "tts", "bicara",
@@ -130,9 +132,10 @@ DEV_ADVANCED_KEYWORDS = {
     "bersihkan ram", "clean ram", "memory pressure", "tekanan memori", "oom", "zram", "swap", "drop caches",
     "python", "repl", "eksekusi kode", "script", "hitung", "kalkulasi", "evaluasi",
     "ipynb", "notebook", "jupyter",
+    "golang", "go", "php", "sql", "html", "css", "bash", "shell", "javascript", "js", "typescript", "ts", "rust", "c++", "java",
     "screenshot kode", "screenshot", "code to image", "code_to_image", "codesnap", "gambar kode",
     "teks jadi gambar", "vscode", "vs code", "dark+",
-    "root", "su", "tsu", "shell", "terminal", "bash", "command", "perintah shell", "dmesg", "logcat",
+    "root", "su", "tsu", "shell", "terminal", "command", "perintah shell", "dmesg", "logcat",
     "cron", "cronjob", "watcher", "pemantauan", "berkala", "otomasi", "tick", "sensor watcher",
 }
 

@@ -110,6 +110,9 @@ DARK_PLUS_TOKEN_MAP = {
     "Token.Name.Constant": "#4FC1FF",       # CONSTANTS
     "Token.Name.Tag": "#569CD6",            # HTML / XML tags
     "Token.Name.Attribute": "#9CDCFE",      # HTML / XML attributes
+    "Token.Name.Property": "#9CDCFE",       # Object/CSS properties
+    "Token.Name.Label": "#9CDCFE",          # Goto labels / cases
+    "Token.Name.Namespace": "#4EC9B0",      # Package / namespace
     "Token.Name": "#9CDCFE",
 
     # Literals - Strings
@@ -118,11 +121,15 @@ DARK_PLUS_TOKEN_MAP = {
     "Token.String.Interpol": "#9CDCFE",     # {var} in f-strings
     "Token.String.Regex": "#D16969",        # Regex patterns
     "Token.String": "#CE9178",              # "hello", 'world'
+    "Token.Literal.String": "#CE9178",
 
     # Literals - Numbers
     "Token.Number": "#B5CEA8",              # 123, 3.14, 0xFF
+    "Token.Literal.Number": "#B5CEA8",
 
     # Comments
+    "Token.Comment.Preproc": "#C586C0",     # Preprocessor #include, <?php
+    "Token.Comment.Special": "#6A9955",
     "Token.Comment": "#6A9955",             # # comment, // comment
 
     # Operators & Punctuation
@@ -137,40 +144,165 @@ DARK_PLUS_TOKEN_MAP = {
     "Token.Generic.Inserted": "#B5CEA8",
     "Token.Generic.Error": "#F44747",
     "Token.Text": "#D4D4D4",
+    "Token.Literal": "#CE9178",
 }
 
 # File type metadata (Extension -> (Display Name, Icon Color, Icon Symbol))
 FILE_TYPE_REGISTRY = {
+    # Python
     ".py": ("Python", "#3572A5", "PY"),
+    ".pyw": ("Python", "#3572A5", "PY"),
+    ".pyx": ("Cython", "#3572A5", "CY"),
+    # Go / Golang
     ".go": ("Go", "#00ADD8", "GO"),
+    # PHP
     ".php": ("PHP", "#777BB4", "PHP"),
+    ".phtml": ("PHP", "#777BB4", "PHP"),
+    # JavaScript & TypeScript
     ".js": ("JavaScript", "#F7DF1E", "JS"),
     ".mjs": ("JavaScript", "#F7DF1E", "JS"),
     ".cjs": ("JavaScript", "#F7DF1E", "JS"),
     ".ts": ("TypeScript", "#3178C6", "TS"),
-    ".jsx": ("React", "#61DAFB", "JSX"),
-    ".tsx": ("React TS", "#61DAFB", "TSX"),
+    ".mts": ("TypeScript", "#3178C6", "TS"),
+    ".cts": ("TypeScript", "#3178C6", "TS"),
+    ".jsx": ("React JSX", "#61DAFB", "JSX"),
+    ".tsx": ("React TSX", "#61DAFB", "TSX"),
+    # Web / Markup
     ".html": ("HTML", "#E34F26", "<>"),
     ".htm": ("HTML", "#E34F26", "<>"),
+    ".xhtml": ("HTML", "#E34F26", "<>"),
     ".css": ("CSS", "#563D7C", "#"),
     ".scss": ("SCSS", "#CF649A", "#"),
-    ".json": ("JSON", "#CBCB41", "{ }"),
+    ".sass": ("Sass", "#CF649A", "#"),
+    ".less": ("Less", "#1D365D", "#"),
+    ".xml": ("XML", "#E34F26", "XML"),
+    ".svg": ("SVG", "#FF9900", "SVG"),
+    # Shell & Scripts
     ".sh": ("Bash", "#4EAA25", "$_"),
     ".bash": ("Bash", "#4EAA25", "$_"),
     ".zsh": ("Zsh", "#4EAA25", "$_"),
-    ".rs": ("Rust", "#DEA584", "RS"),
-    ".java": ("Java", "#B07219", "JV"),
-    ".cpp": ("C++", "#00599C", "C++"),
-    ".c": ("C", "#555555", "C"),
-    ".h": ("C Header", "#555555", "H"),
+    ".ksh": ("Ksh", "#4EAA25", "$_"),
+    ".fish": ("Fish", "#D64214", "><"),
+    ".ps1": ("PowerShell", "#012456", "PS"),
+    ".bat": ("Batch", "#C1F12E", "BAT"),
+    ".cmd": ("Batch", "#C1F12E", "CMD"),
+    # Database / SQL
     ".sql": ("SQL", "#E38C00", "SQL"),
-    ".md": ("Markdown", "#083FA1", "MD"),
-    ".ipynb": ("Jupyter", "#F37626", "NB"),
+    ".pgsql": ("PostgreSQL", "#336791", "PG"),
+    ".mysql": ("MySQL", "#00758F", "MY"),
+    ".sqlite": ("SQLite", "#003B57", "SQL"),
+    ".prisma": ("Prisma", "#2D3748", "▲"),
+    # Data & Config
+    ".json": ("JSON", "#CBCB41", "{ }"),
+    ".jsonc": ("JSON", "#CBCB41", "{ }"),
+    ".json5": ("JSON5", "#CBCB41", "{ }"),
     ".yaml": ("YAML", "#CB171E", "YM"),
     ".yml": ("YAML", "#CB171E", "YM"),
     ".toml": ("TOML", "#9C4121", "TO"),
+    ".ini": ("INI", "#6D8086", "⚙"),
+    ".cfg": ("Config", "#6D8086", "⚙"),
+    ".conf": ("Config", "#6D8086", "⚙"),
     ".env": ("Config", "#6D8086", "⚙"),
+    # Systems & Compiled
+    ".rs": ("Rust", "#DEA584", "RS"),
+    ".c": ("C", "#555555", "C"),
+    ".h": ("C Header", "#555555", "H"),
+    ".cpp": ("C++", "#00599C", "C++"),
+    ".cc": ("C++", "#00599C", "C++"),
+    ".cxx": ("C++", "#00599C", "C++"),
+    ".hpp": ("C++ Header", "#00599C", "H++"),
+    ".cs": ("C#", "#178600", "C#"),
+    ".java": ("Java", "#B07219", "JV"),
+    ".kt": ("Kotlin", "#A97BFF", "KT"),
+    ".kts": ("Kotlin", "#A97BFF", "KT"),
+    ".scala": ("Scala", "#DC322F", "SC"),
+    ".swift": ("Swift", "#F05138", "SW"),
+    ".dart": ("Dart", "#00B4AB", "DT"),
+    # Dynamic Scripting
+    ".rb": ("Ruby", "#701516", "RB"),
+    ".lua": ("Lua", "#000080", "LUA"),
+    ".pl": ("Perl", "#0298C3", "PL"),
+    ".r": ("R", "#198CE7", "R"),
+    ".jl": ("Julia", "#A270BA", "JL"),
+    # Notebooks & Documentation
+    ".ipynb": ("Jupyter", "#F37626", "NB"),
+    ".md": ("Markdown", "#083FA1", "MD"),
+    ".markdown": ("Markdown", "#083FA1", "MD"),
+    ".graphql": ("GraphQL", "#E10098", "GQL"),
+    ".gql": ("GraphQL", "#E10098", "GQL"),
+    ".sol": ("Solidity", "#AA6746", "SOL"),
+    ".diff": ("Diff", "#888888", "+-"),
+    ".patch": ("Patch", "#888888", "+-"),
     ".txt": ("Plain Text", "#CCCCCC", "TXT"),
+}
+
+# Exact filename matches (case-insensitive)
+EXACT_FILENAME_REGISTRY = {
+    "dockerfile": ("Docker", "#384D54", "🐳"),
+    "containerfile": ("Docker", "#384D54", "🐳"),
+    "makefile": ("Makefile", "#427819", "MK"),
+    "gnumakefile": ("Makefile", "#427819", "MK"),
+    ".gitignore": ("Git", "#F05032", "GIT"),
+    ".gitconfig": ("Git", "#F05032", "GIT"),
+    ".dockerignore": ("Docker", "#384D54", "🐳"),
+    ".env": ("Config", "#6D8086", "⚙"),
+    "gemfile": ("Ruby", "#701516", "RB"),
+    "rakefile": ("Ruby", "#701516", "RB"),
+}
+
+# Default filename per language when none is given
+DEFAULT_FILENAMES_PER_LANG = {
+    "python": "main.py",
+    "py": "main.py",
+    "go": "main.go",
+    "golang": "main.go",
+    "php": "index.php",
+    "javascript": "app.js",
+    "js": "app.js",
+    "typescript": "app.ts",
+    "ts": "app.ts",
+    "jsx": "App.jsx",
+    "tsx": "App.tsx",
+    "html": "index.html",
+    "htm": "index.html",
+    "css": "style.css",
+    "scss": "style.scss",
+    "sql": "query.sql",
+    "mysql": "query.sql",
+    "postgres": "query.sql",
+    "postgresql": "query.sql",
+    "sqlite": "query.sql",
+    "bash": "script.sh",
+    "sh": "script.sh",
+    "shell": "script.sh",
+    "zsh": "script.zsh",
+    "json": "data.json",
+    "yaml": "config.yaml",
+    "yml": "config.yaml",
+    "toml": "config.toml",
+    "rust": "main.rs",
+    "rs": "main.rs",
+    "c": "main.c",
+    "cpp": "main.cpp",
+    "c++": "main.cpp",
+    "csharp": "Program.cs",
+    "cs": "Program.cs",
+    "java": "Main.java",
+    "kotlin": "Main.kt",
+    "kt": "Main.kt",
+    "dart": "main.dart",
+    "ruby": "app.rb",
+    "swift": "main.swift",
+    "r": "script.R",
+    "lua": "main.lua",
+    "markdown": "README.md",
+    "md": "README.md",
+    "ipynb": "notebook.ipynb",
+    "jupyter": "notebook.ipynb",
+    "docker": "Dockerfile",
+    "dockerfile": "Dockerfile",
+    "makefile": "Makefile",
+    "diff": "changes.diff",
 }
 
 
@@ -236,27 +368,137 @@ def resolve_lexer(lang: str | None, filename: str, code: str) -> Any:
     if not PYGMENTS_AVAILABLE:
         return None
 
-    # Normalization for common aliases
+    # Normalization for comprehensive language aliases
     lang_aliases = {
-        "js": "javascript",
-        "ts": "typescript",
+        # Python
         "py": "python",
+        "py3": "python",
+        "python3": "python",
+        "ipynb": "python",
+        # Go
+        "golang": "go",
+        # PHP
+        "php": "php",
+        "php8": "php",
+        "phtml": "php",
+        # JS / TS
+        "js": "javascript",
+        "mjs": "javascript",
+        "cjs": "javascript",
+        "node": "javascript",
+        "ts": "typescript",
+        "mts": "typescript",
+        "cts": "typescript",
+        "jsx": "jsx",
+        "tsx": "tsx",
+        # Web
+        "html": "html",
+        "htm": "html",
+        "css": "css",
+        "scss": "scss",
+        "sass": "sass",
+        "less": "less",
+        "svg": "xml",
+        "xml": "xml",
+        # Shell / Bash
         "sh": "bash",
+        "bash": "bash",
         "zsh": "bash",
         "shell": "bash",
+        "ksh": "bash",
+        # SQL / Database
+        "sql": "sql",
+        "mysql": "mysql",
+        "postgres": "postgresql",
+        "postgresql": "postgresql",
+        "pgsql": "postgresql",
+        "sqlite": "sqlite3",
+        "sqlite3": "sqlite3",
+        "plsql": "plpgsql",
+        # Data & Config
+        "json": "json",
+        "jsonc": "json",
+        "json5": "json",
+        "yaml": "yaml",
         "yml": "yaml",
-        "golang": "go",
-        "ipynb": "python",  # Jupyter python code cells
+        "toml": "toml",
+        "ini": "ini",
+        "conf": "ini",
+        "cfg": "ini",
+        "env": "bash",
+        # Systems / Compiled
+        "rs": "rust",
+        "rust": "rust",
+        "c": "c",
+        "h": "c",
+        "cpp": "cpp",
+        "c++": "cpp",
+        "cc": "cpp",
+        "cxx": "cpp",
+        "hpp": "cpp",
+        "cs": "csharp",
+        "csharp": "csharp",
+        "c#": "csharp",
+        "java": "java",
+        "kt": "kotlin",
+        "kts": "kotlin",
+        "kotlin": "kotlin",
+        "scala": "scala",
+        "swift": "swift",
+        "dart": "dart",
+        "flutter": "dart",
+        # Scripting
+        "rb": "ruby",
+        "ruby": "ruby",
+        "lua": "lua",
+        "pl": "perl",
+        "perl": "perl",
+        "r": "r",
+        "ps1": "powershell",
+        "pwsh": "powershell",
+        "powershell": "powershell",
+        # Misc
+        "md": "markdown",
+        "markdown": "markdown",
+        "docker": "dockerfile",
+        "dockerfile": "dockerfile",
+        "makefile": "makefile",
+        "make": "makefile",
+        "graphql": "graphql",
+        "gql": "graphql",
+        "sol": "solidity",
+        "solidity": "solidity",
+        "diff": "diff",
+        "patch": "diff",
     }
 
     if lang:
         normalized_lang = lang_aliases.get(lang.lower().strip(), lang.lower().strip())
+        if normalized_lang == "php":
+            try:
+                from pygments.lexers.web import PhpLexer
+                if "<?php" not in code and "<?" not in code:
+                    return PhpLexer(startinline=True)
+                return PhpLexer()
+            except Exception:
+                pass
         try:
             return get_lexer_by_name(normalized_lang)
         except Exception:
             pass
 
     if filename:
+        base = os.path.basename(filename).lower()
+        if base in ["dockerfile", "containerfile"]:
+            try:
+                return get_lexer_by_name("dockerfile")
+            except Exception:
+                pass
+        if base in ["makefile", "gnumakefile"]:
+            try:
+                return get_lexer_by_name("makefile")
+            except Exception:
+                pass
         try:
             return get_lexer_for_filename(filename, code)
         except Exception:
@@ -484,12 +726,17 @@ def parse_markdown_blocks(source: str) -> list[dict[str, Any]]:
 
 def get_file_type_meta(filename: str, lang: str | None = None) -> tuple[str, str, str]:
     """Return (Language Name, Badge Color, Badge Text) for filename and lang."""
+    base = os.path.basename(filename).lower()
+    if base in EXACT_FILENAME_REGISTRY:
+        return EXACT_FILENAME_REGISTRY[base]
+
     ext = os.path.splitext(filename)[1].lower()
     if ext in FILE_TYPE_REGISTRY:
         return FILE_TYPE_REGISTRY[ext]
 
     if lang:
         lang_lower = lang.lower().strip()
+        # Direct language name match or alias
         for fext, (name, color, badge) in FILE_TYPE_REGISTRY.items():
             if name.lower() == lang_lower or fext.lstrip(".") == lang_lower:
                 return (name, color, badge)
@@ -616,8 +863,18 @@ class VSCodeImageRenderer:
         no_status_bar: bool = False,
     ) -> None:
         self.raw_code = code
-        self.name = name or "main.py"
         self.lang = lang
+
+        # If filename wasn't explicitly set or is default main.py, infer from language
+        if (not name or name == "main.py") and lang:
+            normalized_lang = lang.lower().strip()
+            if normalized_lang in DEFAULT_FILENAMES_PER_LANG:
+                self.name = DEFAULT_FILENAMES_PER_LANG[normalized_lang]
+            else:
+                self.name = name or "main.py"
+        else:
+            self.name = name or "main.py"
+
         self.path = path or self.name
         self.frame = frame.lower().strip()
         if self.frame not in ["tab", "full", "none"]:
@@ -1747,6 +2004,10 @@ def main() -> None:
         else:
             parser.print_help()
             sys.exit(1)
+
+    if (not filename or filename == "main.py") and args.lang:
+        normalized_l = args.lang.lower().strip()
+        filename = DEFAULT_FILENAMES_PER_LANG.get(normalized_l, filename or "main.py")
 
     if not filename:
         filename = "main.py"

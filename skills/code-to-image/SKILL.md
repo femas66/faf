@@ -50,8 +50,8 @@ python code_to_image.py [OPSI]
 | `--file` | `-f` | Path | `None` | Path berkas kode sumber yang akan dibaca |
 | `--text` | `-t` | String | `None` | Teks kode yang akan dirender langsung via CLI |
 | `stdin` | - | Stream | - | Kode dapat dialirkan via pipe (`cat file.py \| python code_to_image.py`) |
-| `--lang` | `-l` | String | Otomatis | Bahasa kode (`python`, `go`, `php`, `js`, `ts`, `json`, `bash`, `ipynb`, dll.) |
-| `--name` | `-n` | String | `main.py` | Nama file di tab VS Code (menentukan ikon & deteksi bahasa) |
+| `--lang` | `-l` | String | Otomatis | Bahasa kode (`python`, `golang`, `php`, `html`, `js`, `ts`, `bash`, `sql`, `css`, `json`, `ipynb`, dll.) |
+| `--name` | `-n` | String | Otomatis | Nama file di tab VS Code (otomatis disesuaikan dengan bahasa jika kosong) |
 | `--path` | `-p` | String | Nilai `--name` | Isi jalur breadcrumb di atas editor (contoh: `src/utils/main.py`) |
 | `--frame` | - | Enum | `tab` | Gaya frame: `tab` (default, tanpa status bar), `full` (+ title bar & status bar), `none` (kode saja) |
 | `--os` | - | `win` \| `mac` | `mac` (di Mac) / `win` | Gaya title bar jendela untuk frame `full` |
@@ -69,7 +69,38 @@ python code_to_image.py [OPSI]
 
 ---
 
-## 3. Contoh Penggunaan CLI
+## 3. Dukungan Bahasa Pemrograman Lengkap
+
+Tool ini mendukung sintaks hampir semua bahasa pemrograman populer dengan badge ikon tab dan pewarnaan Dark+ otentik:
+
+| Kategori | Bahasa | Ekstensi Berkas | Ikon Tab & Warna |
+|---|---|---|---|
+| **Backend & Systems** | **Golang** | `.go` | `GO` (Cyan `#00ADD8`) |
+| | **PHP** | `.php`, `.phtml` | `PHP` (Ungu `#777BB4`, auto-inline) |
+| | **Python** | `.py`, `.pyw`, `.pyx` | `PY` (Biru `#3572A5`) |
+| | **Rust** | `.rs` | `RS` (Cokelat `#DEA584`) |
+| | **C / C++** | `.c`, `.h`, `.cpp`, `.hpp`, `.cc` | `C` / `C++` (Biru `#00599C`) |
+| | **C#** | `.cs` | `C#` (Hijau `#178600`) |
+| | **Java / Kotlin**| `.java`, `.kt`, `.kts` | `JV` / `KT` (Oranye `#B07219`) |
+| **Web & Frontend** | **HTML** | `.html`, `.htm`, `.xhtml` | `<>` (Oranye `#E34F26`) |
+| | **JavaScript** | `.js`, `.mjs`, `.cjs` | `JS` (Kuning `#F7DF1E`) |
+| | **TypeScript** | `.ts`, `.mts`, `.cts` | `TS` (Biru `#3178C6`) |
+| | **React JSX/TSX**| `.jsx`, `.tsx` | `JSX` / `TSX` (Cyan `#61DAFB`) |
+| | **CSS / SCSS** | `.css`, `.scss`, `.sass`, `.less` | `#` (Ungu `#563D7C`) |
+| **Database & Query** | **SQL** | `.sql`, `.pgsql`, `.mysql`, `.sqlite` | `SQL` (Emas `#E38C00`) |
+| | **Prisma** | `.prisma` | `▲` (Dark `#2D3748`) |
+| **Shell & DevOps** | **Bash / Shell** | `.sh`, `.bash`, `.zsh`, `.ksh`, `.fish` | `$_` (Hijau `#4EAA25`) |
+| | **PowerShell** | `.ps1` | `PS` (Biru Navy `#012456`) |
+| | **Docker** | `Dockerfile`, `.dockerignore` | `🐳` (Biru Tua `#384D54`) |
+| | **Makefile** | `Makefile`, `gnumakefile` | `MK` (Hijau Zaitun `#427819`) |
+| **Data & Notebook** | **Jupyter** | `.ipynb` | `NB` (Oranye `#F37626`, rich card) |
+| | **JSON / YAML** | `.json`, `.yaml`, `.yml`, `.toml` | `{ }` / `YM` / `TO` |
+| | **Markdown** | `.md`, `.markdown` | `MD` (Biru `#083FA1`) |
+| | **Config / Env** | `.env`, `.ini`, `.cfg`, `.conf` | `⚙` (Abu-abu `#6D8086`) |
+
+---
+
+## 4. Contoh Penggunaan CLI
 
 ### A. Format Standar (Frame Tab, Tanpa Status Bar)
 ```bash
@@ -142,14 +173,38 @@ python code_to_image.py \
   -o jupyter.png
 ```
 
-### F. Pipe Melalui Stdin & Soft Wrap
+### F. Query SQL & Script Bash
+```bash
+# SQL Query
+python code_to_image.py \
+  --text "SELECT u.id, u.name, COUNT(o.id) AS total_orders
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.status = 'active'
+GROUP BY u.id
+ORDER BY total_orders DESC;" \
+  --lang sql \
+  -o sql_preview.png
+
+# Bash Script
+python code_to_image.py \
+  --text "#!/bin/bash
+set -euo pipefail
+echo 'Starting deployment...'
+rsync -avz --delete ./dist/ server:/var/www/html/
+echo 'Deployment finished successfully!'" \
+  --lang bash \
+  -o bash_preview.png
+```
+
+### G. Pipe Melalui Stdin & Soft Wrap
 ```bash
 git diff | python code_to_image.py --lang diff --name diff.patch --wrap 80 -o diff.png
 ```
 
 ---
 
-## 4. Kustomisasi Font
+## 5. Kustomisasi Font
 
 Pengguna dapat meletakkan font TrueType/OpenType monospace favorit mereka (seperti Cascadia Code, JetBrains Mono, Fira Code, atau Menlo) ke dalam folder `.fonts/`:
 
@@ -165,7 +220,7 @@ faf-agent/
 
 ---
 
-## 5. Integrasi Tool Agen AI (`CodeToImageTool`)
+## 6. Integrasi Tool Agen AI (`CodeToImageTool`)
 
 Tool ini terdaftar di registri bawaan `faf-agent` dengan nama `code_to_image`. Agen AI dapat memanggil tool ini secara otomatis saat pengguna Telegram meminta gambar kodingan:
 
