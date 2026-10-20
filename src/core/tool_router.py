@@ -31,6 +31,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
     CATEGORY_FILES: {
         "file_manager",
         "pdf_manager",
+        "code_to_image",
         "ask_clarification",
     },
     CATEGORY_WEB_MEDIA: {
@@ -103,7 +104,7 @@ SYSTEM_KEYWORDS = {
 
 FILE_KEYWORDS = {
     "file", "berkas", "folder", "direktori", "directory", "path", "dokumen",
-    "txt", "log", "csv", "json", "xml", "zip", "tar", "gz", "pdf",
+    "txt", "log", "csv", "json", "xml", "zip", "tar", "gz", "pdf", "ipynb", "notebook", "jupyter",
     "baca file", "tulis file", "edit file", "hapus file", "cari file", "buat file",
     "simpan file", "salin file", "pindah file", "list file", "baca pdf", "cari teks",
     "/sdcard", "/data", "/storage", "~/", "documents", "download",
@@ -114,10 +115,12 @@ WEB_MEDIA_KEYWORDS = {
     "web search", "search web", "browsing", "internet", "website", "url", "situs", "link", "tautan", "http", "https",
     "download", "unduh", "video", "youtube", "yt", "tiktok", "instagram", "ig", "twitter", "x.com",
     "yt-dlp", "aria2", "torrent", "magnet", "mp3", "mp4",
-    "screenshot web", "tangkapan layar web", "web screenshot",
-    "screenshot kode", "code to image", "codesnap", "gambar kode", "teks jadi gambar", "vscode",
+    "screenshot", "screenshot web", "tangkapan layar", "tangkapan layar web", "web screenshot",
+    "screenshot kode", "code to image", "code_to_image", "codesnap", "gambar kode", "teks jadi gambar",
+    "vscode", "vs code", "dark+", "render kode", "render gambar", "ubah jadi gambar", "jadikan gambar",
     "ocr", "ekstrak teks", "baca gambar", "tesseract", "scan teks", "foto dokumen",
-    "musik", "lagu", "play", "pause", "kamera", "foto", "jepret", "rekam suara", "mikrofon", "tts", "bicara",
+    "musik", "lagu", "play", "pause", "kamera", "foto", "fotonya", "gambar", "gambarnya", "jepret",
+    "rekam suara", "mikrofon", "tts", "bicara",
 }
 
 DEV_ADVANCED_KEYWORDS = {
@@ -126,7 +129,9 @@ DEV_ADVANCED_KEYWORDS = {
     "process", "proses", "pid", "top cpu", "cpu", "ram", "memori linux", "kill", "ps",
     "bersihkan ram", "clean ram", "memory pressure", "tekanan memori", "oom", "zram", "swap", "drop caches",
     "python", "repl", "eksekusi kode", "script", "hitung", "kalkulasi", "evaluasi",
-    "screenshot kode", "code to image", "codesnap", "gambar kode", "teks jadi gambar", "vscode", "dark+",
+    "ipynb", "notebook", "jupyter",
+    "screenshot kode", "screenshot", "code to image", "code_to_image", "codesnap", "gambar kode",
+    "teks jadi gambar", "vscode", "vs code", "dark+",
     "root", "su", "tsu", "shell", "terminal", "bash", "command", "perintah shell", "dmesg", "logcat",
     "cron", "cronjob", "watcher", "pemantauan", "berkala", "otomasi", "tick", "sensor watcher",
 }
