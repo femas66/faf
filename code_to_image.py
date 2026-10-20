@@ -378,6 +378,110 @@ def find_monospace_font(
     return ImageFont.load_default()
 
 
+def find_sans_font(
+    custom_path: str | None = None,
+    custom_dir: str | None = None,
+    size: int = 14,
+    bold: bool = False,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Find and load a clean sans-serif font for UI and rendered markdown."""
+    candidate_paths: list[str] = []
+
+    if custom_path and os.path.isfile(custom_path):
+        candidate_paths.append(custom_path)
+
+    if bold:
+        candidate_paths.extend([
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/system/fonts/Roboto-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "C:\\Windows\\Fonts\\segoeuib.ttf",
+            "C:\\Windows\\Fonts\\arialbd.ttf",
+        ])
+    else:
+        candidate_paths.extend([
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+            "/system/fonts/Roboto-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "C:\\Windows\\Fonts\\arial.ttf",
+        ])
+
+    for p in candidate_paths:
+        if os.path.isfile(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+
+    # Fallback to monospace font
+    return find_monospace_font(custom_path, custom_dir, size, bold=bold)
+
+
+def parse_markdown_spans(text: str) -> list[dict[str, str]]:
+    """Parse inline markdown into list of spans (regular, bold, italic, code)."""
+    spans: list[dict[str, str]] = []
+    pattern = re.compile(r"(\*\*.*?\*\*|\*.*?\*|`[^`]+`)")
+    last_idx = 0
+    for m in pattern.finditer(text):
+        if m.start() > last_idx:
+            spans.append({"style": "regular", "text": text[last_idx:m.start()]})
+        val = m.group()
+        if val.startswith("**") and val.endswith("**"):
+            spans.append({"style": "bold", "text": val[2:-2]})
+        elif val.startswith("*") and val.endswith("*"):
+            spans.append({"style": "italic", "text": val[1:-1]})
+        elif val.startswith("`") and val.endswith("`"):
+            spans.append({"style": "code", "text": val[1:-1]})
+        last_idx = m.end()
+    if last_idx < len(text):
+        spans.append({"style": "regular", "text": text[last_idx:]})
+    return spans
+
+
+def parse_markdown_blocks(source: str) -> list[dict[str, Any]]:
+    """Parse notebook markdown text into structured block elements."""
+    lines = source.split("\n")
+    blocks: list[dict[str, Any]] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            blocks.append({"type": "blank"})
+        elif line.startswith("# "):
+            blocks.append({"type": "h1", "text": line[2:].strip()})
+        elif line.startswith("## "):
+            blocks.append({"type": "h2", "text": line[3:].strip()})
+        elif line.startswith("### "):
+            blocks.append({"type": "h3", "text": line[4:].strip()})
+        elif line.startswith("#### "):
+            blocks.append({"type": "h4", "text": line[5:].strip()})
+        elif line.startswith("- ") or line.startswith("* "):
+            blocks.append({"type": "bullet", "spans": parse_markdown_spans(line[2:].strip())})
+        elif re.match(r"^\d+\.\s+", line):
+            m = re.match(r"^(\d+\.)\s+(.*)$", line)
+            if m:
+                blocks.append({
+                    "type": "number",
+                    "num": m.group(1),
+                    "spans": parse_markdown_spans(m.group(2)),
+                })
+            else:
+                blocks.append({"type": "paragraph", "spans": parse_markdown_spans(line)})
+        elif line.startswith("> "):
+            blocks.append({"type": "quote", "spans": parse_markdown_spans(line[2:].strip())})
+        elif stripped in ["---", "***", "___"]:
+            blocks.append({"type": "hr"})
+        else:
+            blocks.append({"type": "paragraph", "spans": parse_markdown_spans(line)})
+    return blocks
+
+
 def get_file_type_meta(filename: str, lang: str | None = None) -> tuple[str, str, str]:
     """Return (Language Name, Badge Color, Badge Text) for filename and lang."""
     ext = os.path.splitext(filename)[1].lower()
@@ -405,10 +509,31 @@ def parse_ipynb_cells(content: str) -> list[dict[str, Any]] | None:
                 if isinstance(source, list):
                     source = "".join(source)
                 execution_count = c.get("execution_count")
+
+                # Extract stdout or execute_result text if available
+                output_lines: list[str] = []
+                raw_outputs = c.get("outputs", [])
+                if isinstance(raw_outputs, list):
+                    for out in raw_outputs:
+                        if isinstance(out, dict):
+                            if out.get("output_type") == "stream" and "text" in out:
+                                t = out["text"]
+                                if isinstance(t, list):
+                                    output_lines.extend([ln.rstrip("\r\n") for ln in t])
+                                elif isinstance(t, str):
+                                    output_lines.extend(t.splitlines())
+                            elif "data" in out and isinstance(out["data"], dict):
+                                plain = out["data"].get("text/plain")
+                                if isinstance(plain, list):
+                                    output_lines.extend([ln.rstrip("\r\n") for ln in plain])
+                                elif isinstance(plain, str):
+                                    output_lines.extend(plain.splitlines())
+
                 cells.append({
                     "cell_type": cell_type,
                     "source": source,
                     "execution_count": execution_count,
+                    "outputs": output_lines,
                 })
             return cells
     except Exception:
@@ -537,6 +662,23 @@ class VSCodeImageRenderer:
             self.font_path, self.font_dir, size=self.ui_font_size, bold=True
         )
 
+        # Markdown fonts for Jupyter Notebook
+        self.md_h1_font = find_sans_font(
+            self.font_path, self.font_dir, size=int(self.base_font_size * 1.5), bold=True
+        )
+        self.md_h2_font = find_sans_font(
+            self.font_path, self.font_dir, size=int(self.base_font_size * 1.3), bold=True
+        )
+        self.md_h3_font = find_sans_font(
+            self.font_path, self.font_dir, size=int(self.base_font_size * 1.15), bold=True
+        )
+        self.md_text_font = find_sans_font(
+            self.font_path, self.font_dir, size=self.base_font_size, bold=False
+        )
+        self.md_text_bold = find_sans_font(
+            self.font_path, self.font_dir, size=self.base_font_size, bold=True
+        )
+
         # Measurements
         self._measure_char_metrics()
 
@@ -556,96 +698,60 @@ class VSCodeImageRenderer:
 
     def _prepare_render_rows(self) -> list[dict[str, Any]]:
         """
-        Tokenize code and break into rendered visual rows.
+        Tokenize code and break into rendered visual rows for standard editor.
         Returns a list of row dicts with tokens, line numbers, highlight state, cursor.
         """
         rows: list[dict[str, Any]] = []
+        lexer = resolve_lexer(self.lang, self.name, self.raw_code)
+        token_lines = tokenize_code_lines(self.raw_code, lexer)
+        wrapped = soft_wrap_token_lines(token_lines, self.wrap_cols or 0)
 
-        if self.ipynb_cells:
-            # Render Jupyter Notebook cells
-            for cell_idx, cell in enumerate(self.ipynb_cells):
-                c_type = cell["cell_type"]
-                source = cell["source"]
-                exec_count = cell.get("execution_count")
+        for orig_line_idx, tokens in wrapped:
+            disp_line_no = (
+                (self.start_line + orig_line_idx)
+                if orig_line_idx is not None
+                else None
+            )
 
-                # Banner row for cell header
-                banner_text = f"── [{exec_count or ' '}]: Code Cell ──" if c_type == "code" else "── Markdown Cell ──"
-                rows.append({
-                    "is_cell_banner": True,
-                    "cell_type": c_type,
-                    "banner_text": banner_text,
-                    "line_no": None,
-                    "tokens": [(banner_text, "#569CD6" if c_type == "code" else "#4EC9B0")],
-                    "is_highlight": False,
-                    "has_cursor": False,
-                    "cursor_col": None,
-                })
+            # Check highlight (matches either displayed number or 1-based index)
+            is_hl = False
+            if orig_line_idx is not None:
+                idx_1based = orig_line_idx + 1
+                if (
+                    disp_line_no in self.highlight_set
+                    or idx_1based in self.highlight_set
+                ):
+                    is_hl = True
 
-                lexer = resolve_lexer("python" if c_type == "code" else "markdown", "", source)
-                token_lines = tokenize_code_lines(source, lexer)
-                wrapped = soft_wrap_token_lines(token_lines, self.wrap_cols or 0)
+            # Check cursor
+            has_cur = False
+            cur_col = None
+            if orig_line_idx is not None and self.cursor_pos:
+                c_line, c_col = self.cursor_pos
+                if c_line == disp_line_no or c_line == (orig_line_idx + 1):
+                    has_cur = True
+                    cur_col = max(1, c_col)
 
-                for wrap_idx, (orig_line_idx, tokens) in enumerate(wrapped):
-                    disp_line_no = (
-                        (self.start_line + orig_line_idx)
-                        if orig_line_idx is not None
-                        else None
-                    )
-                    rows.append({
-                        "is_cell_banner": False,
-                        "cell_type": c_type,
-                        "line_no": disp_line_no,
-                        "tokens": tokens,
-                        "is_highlight": False,
-                        "has_cursor": False,
-                        "cursor_col": None,
-                    })
-        else:
-            # Standard single code snippet
-            lexer = resolve_lexer(self.lang, self.name, self.raw_code)
-            token_lines = tokenize_code_lines(self.raw_code, lexer)
-            wrapped = soft_wrap_token_lines(token_lines, self.wrap_cols or 0)
-
-            for orig_line_idx, tokens in wrapped:
-                disp_line_no = (
-                    (self.start_line + orig_line_idx)
-                    if orig_line_idx is not None
-                    else None
-                )
-
-                # Check highlight (matches either displayed number or 1-based index)
-                is_hl = False
-                if orig_line_idx is not None:
-                    idx_1based = orig_line_idx + 1
-                    if (
-                        disp_line_no in self.highlight_set
-                        or idx_1based in self.highlight_set
-                    ):
-                        is_hl = True
-
-                # Check cursor
-                has_cur = False
-                cur_col = None
-                if orig_line_idx is not None and self.cursor_pos:
-                    c_line, c_col = self.cursor_pos
-                    if c_line == disp_line_no or c_line == (orig_line_idx + 1):
-                        has_cur = True
-                        cur_col = max(1, c_col)
-
-                rows.append({
-                    "is_cell_banner": False,
-                    "cell_type": "code",
-                    "line_no": disp_line_no,
-                    "tokens": tokens,
-                    "is_highlight": is_hl,
-                    "has_cursor": has_cur,
-                    "cursor_col": cur_col,
-                })
+            rows.append({
+                "is_cell_banner": False,
+                "cell_type": "code",
+                "line_no": disp_line_no,
+                "tokens": tokens,
+                "is_highlight": is_hl,
+                "has_cursor": has_cur,
+                "cursor_col": cur_col,
+            })
 
         return rows
 
     def render(self) -> Image.Image:
         """Draw and produce the final VS Code styled PNG image."""
+        if self.ipynb_cells:
+            return self._render_notebook()
+        return self._render_standard_editor()
+
+    def _render_standard_editor(self) -> Image.Image:
+        """Render single file buffer in classic VS Code editor layout."""
         rows = self._prepare_render_rows()
 
         # Compute max line number for gutter width
@@ -1048,6 +1154,418 @@ class VSCodeImageRenderer:
                 font=self.ui_font,
             )
 
+            curr_y += statusbar_h
+
+        # ----------------------------------------------------------------------
+        # F. FINAL TOUCH: BORDER
+        # ----------------------------------------------------------------------
+        if self.frame in ["tab", "full"]:
+            draw.rectangle([(0, 0), (width - 1, height - 1)], outline=WINDOW_BORDER, width=1)
+
+        return image
+
+    def _render_notebook(self) -> Image.Image:
+        """Render Jupyter Notebook cells with rich Markdown and dedicated Code cards."""
+        # Header heights
+        titlebar_h = int(32 * self.scale) if self.frame == "full" else 0
+        tabbar_h = int(35 * self.scale) if self.frame in ["tab", "full"] else 0
+        breadcrumb_h = int(24 * self.scale) if self.frame in ["tab", "full"] else 0
+        has_statusbar = (self.frame == "full") and (not self.no_status_bar)
+        statusbar_h = int(22 * self.scale) if has_statusbar else 0
+
+        # Margins & card offsets
+        left_pad = int(16 * self.scale) if self.frame != "none" else int(8 * self.scale)
+        right_pad = int(20 * self.scale) if self.frame != "none" else int(8 * self.scale)
+        prompt_w = int(50 * self.scale)
+        card_x = left_pad + prompt_w + int(10 * self.scale)
+        inter_cell_gap = int(16 * self.scale)
+        editor_pad_y = int(16 * self.scale)
+
+        cell_layouts: list[dict[str, Any]] = []
+        max_card_content_w = int(520 * self.scale)
+
+        # 1. Precompute layout and sizes for each cell
+        for cell in (self.ipynb_cells or []):
+            c_type = cell.get("cell_type", "code")
+            source = cell.get("source", "")
+            if c_type == "markdown":
+                blocks = parse_markdown_blocks(source)
+                card_h = int(24 * self.scale)  # padding top + bottom
+                for b in blocks:
+                    bt = b["type"]
+                    if bt == "h1":
+                        card_h += int(self.base_font_size * 1.5 * 1.4) + int(10 * self.scale)
+                    elif bt == "h2":
+                        card_h += int(self.base_font_size * 1.3 * 1.35) + int(8 * self.scale)
+                    elif bt == "h3":
+                        card_h += int(self.base_font_size * 1.15 * 1.3) + int(6 * self.scale)
+                    elif bt == "h4":
+                        card_h += int(self.base_font_size * 1.05 * 1.3) + int(4 * self.scale)
+                    elif bt == "blank":
+                        card_h += int(self.base_font_size * 0.6)
+                    elif bt == "hr":
+                        card_h += int(14 * self.scale)
+                    else:
+                        card_h += int(self.base_font_size * 1.55)
+                cell_layouts.append({"type": "markdown", "blocks": blocks, "height": card_h})
+            else:
+                # Code cell
+                lexer = resolve_lexer("python", "", source)
+                token_lines = tokenize_code_lines(source, lexer)
+                wrapped = soft_wrap_token_lines(token_lines, self.wrap_cols or 0)
+                code_lines_h = len(wrapped) * int(self.base_font_size * 1.55) + int(20 * self.scale)
+
+                raw_outputs = cell.get("outputs", [])
+                out_h = (len(raw_outputs) * int(self.base_font_size * 1.55) + int(14 * self.scale)) if raw_outputs else 0
+                total_card_h = code_lines_h + out_h
+
+                inner_gutter_w = int(max(2, len(str(len(wrapped)))) * self.char_w + int(20 * self.scale))
+                cell_layouts.append({
+                    "type": "code",
+                    "lines": wrapped,
+                    "outputs": raw_outputs,
+                    "exec_count": cell.get("execution_count"),
+                    "height": total_card_h,
+                    "gutter_w": inner_gutter_w,
+                })
+
+        # Calculate overall canvas dimensions
+        min_width = int(720 * self.scale) if self.frame in ["tab", "full"] else int(520 * self.scale)
+        width = max(min_width, card_x + max_card_content_w + right_pad)
+        card_w = width - card_x - right_pad
+
+        total_cells_h = sum(c["height"] for c in cell_layouts) + max(0, len(cell_layouts) - 1) * inter_cell_gap
+        total_editor_h = editor_pad_y * 2 + total_cells_h
+        height = titlebar_h + tabbar_h + breadcrumb_h + total_editor_h + statusbar_h
+
+        image = Image.new("RGBA", (width, height), BG_EDITOR)
+        draw = ImageDraw.Draw(image)
+
+        curr_y = 0
+
+        # ----------------------------------------------------------------------
+        # A. TITLE BAR (Full frame only)
+        # ----------------------------------------------------------------------
+        if self.frame == "full":
+            draw.rectangle([(0, curr_y), (width, curr_y + titlebar_h)], fill=BG_TITLEBAR)
+            draw.line([(0, curr_y + titlebar_h - 1), (width, curr_y + titlebar_h - 1)], fill=BORDER_DIVIDER, width=1)
+
+            if self.os_style == "mac":
+                dot_r = int(6 * self.scale)
+                dot_y = curr_y + (titlebar_h // 2)
+                start_x = int(14 * self.scale)
+                spacing = int(20 * self.scale)
+                for i, color in enumerate([MAC_RED, MAC_YELLOW, MAC_GREEN]):
+                    cx = start_x + (i * spacing)
+                    draw.ellipse([(cx - dot_r, dot_y - dot_r), (cx + dot_r, dot_y + dot_r)], fill=color)
+
+                title_text = f"{self.name} — {self.project}"
+                try:
+                    title_w = self.ui_font.getlength(title_text)
+                except AttributeError:
+                    title_w = len(title_text) * (self.char_w * 0.8)
+                tx = (width - title_w) // 2
+                ty = curr_y + (titlebar_h - self.ui_font_size) // 2
+                draw.text((tx, ty), title_text, fill=FG_TITLEBAR, font=self.ui_font)
+            else:
+                win_icon_x = int(12 * self.scale)
+                win_ty = curr_y + (titlebar_h - self.ui_font_size) // 2
+                draw.text((win_icon_x, win_ty), "◈", fill="#007ACC", font=self.ui_font_bold)
+                title_text = f"{self.name} - {self.project} - Visual Studio Code"
+                draw.text((win_icon_x + int(18 * self.scale), win_ty), title_text, fill=FG_TITLEBAR, font=self.ui_font)
+
+                ctrl_w = int(45 * self.scale)
+                rx = width - (ctrl_w * 3)
+                cy = curr_y + (titlebar_h // 2)
+                draw.line([(rx + 15, cy), (rx + 30, cy)], fill="#CCCCCC", width=1)
+                mx = rx + ctrl_w
+                draw.rectangle([(mx + 16, cy - 5), (mx + 28, cy + 5)], outline="#CCCCCC", width=1)
+                cx = mx + ctrl_w
+                draw.line([(cx + 17, cy - 5), (cx + 27, cy + 5)], fill="#CCCCCC", width=1)
+                draw.line([(cx + 27, cy - 5), (cx + 17, cy + 5)], fill="#CCCCCC", width=1)
+
+            curr_y += titlebar_h
+
+        # ----------------------------------------------------------------------
+        # B. TAB BAR (Tab frame & Full frame)
+        # ----------------------------------------------------------------------
+        if self.frame in ["tab", "full"]:
+            draw.rectangle([(0, curr_y), (width, curr_y + tabbar_h)], fill=BG_TAB_BAR)
+
+            try:
+                name_w = self.ui_font.getlength(self.name)
+            except AttributeError:
+                name_w = len(self.name) * (self.char_w * 0.8)
+
+            badge_w = int(24 * self.scale)
+            tab_padding = int(14 * self.scale)
+            tab_w = int(name_w + badge_w + tab_padding * 2 + (20 * self.scale))
+
+            draw.rectangle([(0, curr_y), (tab_w, curr_y + tabbar_h)], fill=BG_TAB_ACTIVE)
+            draw.line([(0, curr_y), (tab_w, curr_y)], fill=BORDER_TAB_ACTIVE_TOP, width=int(2 * self.scale))
+            draw.line([(tab_w, curr_y), (tab_w, curr_y + tabbar_h)], fill=BG_TAB_BAR, width=1)
+
+            # File Badge Icon in active tab (Orange Jupyter NB)
+            icon_x = int(12 * self.scale)
+            icon_y = curr_y + (tabbar_h - int(14 * self.scale)) // 2
+            draw.rounded_rectangle(
+                [(icon_x, icon_y), (icon_x + int(20 * self.scale), icon_y + int(14 * self.scale))],
+                radius=int(3 * self.scale),
+                fill=self.badge_color,
+            )
+            draw.text((icon_x + int(3 * self.scale), icon_y + int(1 * self.scale)), self.badge_symbol[:3], fill="#FFFFFF", font=self.ui_font_bold)
+
+            tab_text_x = icon_x + int(26 * self.scale)
+            tab_text_y = curr_y + (tabbar_h - self.ui_font_size) // 2
+            draw.text((tab_text_x, tab_text_y), self.name, fill=FG_TAB_ACTIVE, font=self.ui_font)
+
+            close_x = tab_w - int(16 * self.scale)
+            draw.text((close_x, tab_text_y), "×", fill=FG_TAB_CLOSE, font=self.ui_font)
+
+            more_x = width - int(24 * self.scale)
+            draw.text((more_x, tab_text_y), "⋯", fill=FG_TAB_CLOSE, font=self.ui_font)
+
+            curr_y += tabbar_h
+
+        # ----------------------------------------------------------------------
+        # C. BREADCRUMBS BAR (Tab frame & Full frame)
+        # ----------------------------------------------------------------------
+        if self.frame in ["tab", "full"]:
+            draw.rectangle([(0, curr_y), (width, curr_y + breadcrumb_h)], fill=BG_BREADCRUMB)
+            draw.line([(0, curr_y + breadcrumb_h - 1), (width, curr_y + breadcrumb_h - 1)], fill=BORDER_DIVIDER, width=1)
+
+            clean_path = self.path.replace("\\", "/").strip("/")
+            parts = clean_path.split("/") if clean_path else [self.name]
+            bc_x = int(14 * self.scale)
+            bc_y = curr_y + (breadcrumb_h - self.ui_font_size) // 2
+
+            for i, p in enumerate(parts):
+                is_last = (i == len(parts) - 1)
+                color = FG_BREADCRUMB_ACTIVE if is_last else FG_BREADCRUMB
+                if is_last:
+                    draw.ellipse(
+                        [(bc_x, bc_y + int(3 * self.scale)), (bc_x + int(6 * self.scale), bc_y + int(9 * self.scale))],
+                        fill=self.badge_color,
+                    )
+                    bc_x += int(10 * self.scale)
+
+                draw.text((bc_x, bc_y), p, fill=color, font=self.ui_font)
+                try:
+                    pw = self.ui_font.getlength(p)
+                except AttributeError:
+                    pw = len(p) * (self.char_w * 0.8)
+                bc_x += int(pw)
+
+                if not is_last:
+                    sep_str = " › "
+                    draw.text((bc_x, bc_y), sep_str, fill=FG_BREADCRUMB, font=self.ui_font)
+                    try:
+                        sw = self.ui_font.getlength(sep_str)
+                    except AttributeError:
+                        sw = len(sep_str) * (self.char_w * 0.8)
+                    bc_x += int(sw)
+
+            curr_y += breadcrumb_h
+
+        # ----------------------------------------------------------------------
+        # D. NOTEBOOK CELLS AREA
+        # ----------------------------------------------------------------------
+        curr_y += editor_pad_y
+
+        for c in cell_layouts:
+            card_h = c["height"]
+
+            if c["type"] == "markdown":
+                # Render Markdown Card
+                draw.rounded_rectangle(
+                    [(card_x, curr_y), (card_x + card_w, curr_y + card_h)],
+                    radius=int(4 * self.scale),
+                    fill=BG_EDITOR,
+                    outline="#2D2D2E",
+                    width=1,
+                )
+
+                bx = card_x + int(14 * self.scale)
+                by = curr_y + int(12 * self.scale)
+
+                for b in c["blocks"]:
+                    bt = b["type"]
+                    if bt == "h1":
+                        draw.text((bx, by), b["text"], fill="#FFFFFF", font=self.md_h1_font)
+                        by += int(self.base_font_size * 1.5 * 1.4) + int(4 * self.scale)
+                        # Subtle divider under H1
+                        draw.line([(bx, by), (card_x + card_w - int(14 * self.scale), by)], fill="#2D2D2E", width=1)
+                        by += int(6 * self.scale)
+                    elif bt == "h2":
+                        draw.text((bx, by), b["text"], fill="#FFFFFF", font=self.md_h2_font)
+                        by += int(self.base_font_size * 1.3 * 1.35) + int(8 * self.scale)
+                    elif bt == "h3":
+                        draw.text((bx, by), b["text"], fill="#E0E0E0", font=self.md_h3_font)
+                        by += int(self.base_font_size * 1.15 * 1.3) + int(6 * self.scale)
+                    elif bt == "h4":
+                        draw.text((bx, by), b["text"], fill="#E0E0E0", font=self.md_text_bold)
+                        by += int(self.base_font_size * 1.05 * 1.3) + int(4 * self.scale)
+                    elif bt == "bullet":
+                        draw.text((bx + int(2 * self.scale), by), "•", fill="#007ACC", font=self.md_text_bold)
+                        sp_x = bx + int(16 * self.scale)
+                        for sp in b["spans"]:
+                            f = self.md_text_bold if sp["style"] == "bold" else self.md_text_font
+                            col = "#FFFFFF" if sp["style"] == "bold" else "#D4D4D4"
+                            draw.text((sp_x, by), sp["text"], fill=col, font=f)
+                            try:
+                                sp_x += f.getlength(sp["text"])
+                            except AttributeError:
+                                sp_x += len(sp["text"]) * (self.char_w * 0.8)
+                        by += int(self.base_font_size * 1.55)
+                    elif bt == "number":
+                        num_str = b.get("num", "1. ")
+                        draw.text((bx, by), num_str, fill="#858585", font=self.md_text_font)
+                        sp_x = bx + int(18 * self.scale)
+                        for sp in b["spans"]:
+                            f = self.md_text_bold if sp["style"] == "bold" else self.md_text_font
+                            col = "#FFFFFF" if sp["style"] == "bold" else "#D4D4D4"
+                            draw.text((sp_x, by), sp["text"], fill=col, font=f)
+                            try:
+                                sp_x += f.getlength(sp["text"])
+                            except AttributeError:
+                                sp_x += len(sp["text"]) * (self.char_w * 0.8)
+                        by += int(self.base_font_size * 1.55)
+                    elif bt == "quote":
+                        draw.line([(bx, by), (bx, by + int(self.base_font_size * 1.4))], fill="#007ACC", width=int(3 * self.scale))
+                        sp_x = bx + int(10 * self.scale)
+                        for sp in b["spans"]:
+                            draw.text((sp_x, by), sp["text"], fill="#A9A9A9", font=self.md_text_font)
+                            try:
+                                sp_x += self.md_text_font.getlength(sp["text"])
+                            except AttributeError:
+                                sp_x += len(sp["text"]) * (self.char_w * 0.8)
+                        by += int(self.base_font_size * 1.55)
+                    elif bt == "hr":
+                        draw.line([(bx, by + int(7 * self.scale)), (card_x + card_w - int(14 * self.scale), by + int(7 * self.scale))], fill="#3C3C3C", width=1)
+                        by += int(14 * self.scale)
+                    elif bt == "paragraph":
+                        sp_x = bx
+                        for sp in b["spans"]:
+                            if sp["style"] == "code":
+                                try:
+                                    cw = self.code_font.getlength(sp["text"])
+                                except AttributeError:
+                                    cw = len(sp["text"]) * self.char_w
+                                pill_pad = int(4 * self.scale)
+                                draw.rounded_rectangle(
+                                    [(sp_x, by - int(1 * self.scale)), (sp_x + cw + pill_pad * 2, by + self.base_font_size + int(1 * self.scale))],
+                                    radius=int(3 * self.scale),
+                                    fill="#2D2D2D",
+                                )
+                                draw.text((sp_x + pill_pad, by), sp["text"], fill="#CE9178", font=self.code_font)
+                                sp_x += cw + pill_pad * 2
+                            else:
+                                f = self.md_text_bold if sp["style"] == "bold" else self.md_text_font
+                                col = "#FFFFFF" if sp["style"] == "bold" else "#D4D4D4"
+                                draw.text((sp_x, by), sp["text"], fill=col, font=f)
+                                try:
+                                    sp_x += f.getlength(sp["text"])
+                                except AttributeError:
+                                    sp_x += len(sp["text"]) * (self.char_w * 0.8)
+                        by += int(self.base_font_size * 1.55)
+                    elif bt == "blank":
+                        by += int(self.base_font_size * 0.6)
+
+            else:
+                # Code Cell
+                # 1. Left prompt: Run button (Play circle)
+                btn_cx = left_pad + int(26 * self.scale)
+                btn_cy = curr_y + int(14 * self.scale)
+                btn_r = int(8 * self.scale)
+                draw.ellipse([(btn_cx - btn_r, btn_cy - btn_r), (btn_cx + btn_r, btn_cy + btn_r)], fill="#0E639C")
+                draw.polygon(
+                    [
+                        (btn_cx - int(2 * self.scale), btn_cy - int(4 * self.scale)),
+                        (btn_cx + int(4 * self.scale), btn_cy),
+                        (btn_cx - int(2 * self.scale), btn_cy + int(4 * self.scale)),
+                    ],
+                    fill="#FFFFFF",
+                )
+
+                # Execution count
+                ec_str = f"[{c['exec_count']}]" if c["exec_count"] is not None else "[ ]"
+                draw.text((left_pad + int(14 * self.scale), curr_y + int(28 * self.scale)), ec_str, fill="#858585", font=self.ui_font)
+
+                # 2. Draw Code Box Card
+                draw.rounded_rectangle(
+                    [(card_x, curr_y), (card_x + card_w, curr_y + card_h)],
+                    radius=int(4 * self.scale),
+                    fill=BG_EDITOR,
+                    outline="#3C3C3C",
+                    width=1,
+                )
+
+                inner_gutter = c.get("gutter_w", int(32 * self.scale))
+                line_y = curr_y + int(10 * self.scale)
+
+                # Draw code lines and line numbers
+                for idx, (orig_idx, tokens) in enumerate(c["lines"]):
+                    if orig_idx is not None:
+                        ln_str = str(orig_idx + 1)
+                        try:
+                            ln_w = self.code_font.getlength(ln_str)
+                        except AttributeError:
+                            ln_w = len(ln_str) * self.char_w
+                        draw.text((card_x + inner_gutter - ln_w - int(8 * self.scale), line_y), ln_str, fill=GUTTER_FG, font=self.code_font)
+
+                    tx = card_x + inner_gutter + int(10 * self.scale)
+                    for t_text, t_col in tokens:
+                        draw.text((tx, line_y), t_text, fill=t_col, font=self.code_font)
+                        try:
+                            tw = self.code_font.getlength(t_text)
+                        except AttributeError:
+                            tw = len(t_text) * self.char_w
+                        tx += tw
+
+                    line_y += int(self.base_font_size * 1.55)
+
+                # Draw Outputs if present
+                if c.get("outputs"):
+                    draw.line([(card_x, line_y + int(4 * self.scale)), (card_x + card_w, line_y + int(4 * self.scale))], fill="#2B2B2B", width=1)
+                    out_y = line_y + int(10 * self.scale)
+                    for out_ln in c["outputs"]:
+                        draw.text((card_x + int(16 * self.scale), out_y), out_ln, fill="#CCCCCC", font=self.code_font)
+                        out_y += int(self.base_font_size * 1.55)
+
+            curr_y += card_h + inter_cell_gap
+
+        # ----------------------------------------------------------------------
+        # E. STATUS BAR (Full frame only)
+        # ----------------------------------------------------------------------
+        if has_statusbar:
+            draw.rectangle([(0, curr_y), (width, curr_y + statusbar_h)], fill=BG_STATUSBAR)
+            sb_ty = curr_y + (statusbar_h - self.ui_font_size) // 2
+
+            branch_str = f" ⎇ {self.branch} "
+            draw.text((int(8 * self.scale), sb_ty), branch_str, fill=FG_STATUSBAR, font=self.ui_font)
+            try:
+                bw = self.ui_font.getlength(branch_str)
+            except AttributeError:
+                bw = len(branch_str) * (self.char_w * 0.8)
+
+            err_str = " ⮾ 0  ⚠ 0 "
+            draw.text((int(8 * self.scale) + bw + int(10 * self.scale), sb_ty), err_str, fill=FG_STATUSBAR, font=self.ui_font)
+
+            info_parts = [
+                "Jupyter: Idle",
+                "Python 3.12",
+                "UTF-8",
+                "LF",
+                "Jupyter",
+                "🔔",
+            ]
+            full_info_str = "   ".join(info_parts) + " "
+            try:
+                info_w = self.ui_font.getlength(full_info_str)
+            except AttributeError:
+                info_w = len(full_info_str) * (self.char_w * 0.8)
+
+            draw.text((width - info_w - int(10 * self.scale), sb_ty), full_info_str, fill=FG_STATUSBAR, font=self.ui_font)
             curr_y += statusbar_h
 
         # ----------------------------------------------------------------------
