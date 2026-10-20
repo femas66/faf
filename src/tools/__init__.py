@@ -22,6 +22,7 @@ from src.tools.cronjob_mgr import CronJobTool
 from src.tools.weather_mgr import WeatherForecastTool
 from src.tools.pdf_mgr import PDFManagerTool
 from src.tools.skill_maker import CreateCustomSkillTool
+from src.tools.code_to_image import CodeToImageTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -48,6 +49,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(WebSearchTool())
     registry.register(MemoryManagerTool())
     registry.register(PythonReplTool())
+    registry.register(CodeToImageTool())
     return registry
 
 
@@ -80,6 +82,7 @@ __all__ = [
     "WebSearchTool",
     "MemoryManagerTool",
     "PythonReplTool",
+    "CodeToImageTool",
     "create_default_registry",
     "default_registry",
 ]

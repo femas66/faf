@@ -39,6 +39,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
         "web_screenshot",
         "ocr_extract",
         "media_control",
+        "code_to_image",
         "ask_clarification",
     },
     CATEGORY_DEV_ADVANCED: {
@@ -47,6 +48,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
         "python_repl",
         "root_shell_exec",
         "cronjob",
+        "code_to_image",
         "ask_clarification",
     },
     CATEGORY_MEMORY: {
@@ -113,6 +115,7 @@ WEB_MEDIA_KEYWORDS = {
     "download", "unduh", "video", "youtube", "yt", "tiktok", "instagram", "ig", "twitter", "x.com",
     "yt-dlp", "aria2", "torrent", "magnet", "mp3", "mp4",
     "screenshot web", "tangkapan layar web", "web screenshot",
+    "screenshot kode", "code to image", "codesnap", "gambar kode", "teks jadi gambar", "vscode",
     "ocr", "ekstrak teks", "baca gambar", "tesseract", "scan teks", "foto dokumen",
     "musik", "lagu", "play", "pause", "kamera", "foto", "jepret", "rekam suara", "mikrofon", "tts", "bicara",
 }
@@ -123,6 +126,7 @@ DEV_ADVANCED_KEYWORDS = {
     "process", "proses", "pid", "top cpu", "cpu", "ram", "memori linux", "kill", "ps",
     "bersihkan ram", "clean ram", "memory pressure", "tekanan memori", "oom", "zram", "swap", "drop caches",
     "python", "repl", "eksekusi kode", "script", "hitung", "kalkulasi", "evaluasi",
+    "screenshot kode", "code to image", "codesnap", "gambar kode", "teks jadi gambar", "vscode", "dark+",
     "root", "su", "tsu", "shell", "terminal", "bash", "command", "perintah shell", "dmesg", "logcat",
     "cron", "cronjob", "watcher", "pemantauan", "berkala", "otomasi", "tick", "sensor watcher",
 }

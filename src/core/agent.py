@@ -210,6 +210,7 @@ class FafAgent:
             "ocr_extract",
             "web_search",
             "memory_manager",
+            "code_to_image",
         }
         tool_names = {
             t.get("function", {}).get("name")
@@ -309,6 +310,8 @@ class FafAgent:
         """Format a human-friendly status description for tools being executed."""
         if any(name == "web_search" for name in tool_names):
             return "🔍 Menelusuri informasi di internet..."
+        elif any(name == "code_to_image" for name in tool_names):
+            return "📸 Membuat screenshot kode VS Code..."
         elif any(name == "pdf_manager" for name in tool_names):
             return "⏳ Sedang membaca dokumen PDF..."
         elif any(name == "ocr_extract" for name in tool_names):
