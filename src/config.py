@@ -48,6 +48,18 @@ class Settings:
     custom_skills_max_active: int = 30
     custom_skills_runner_timeout: int = 15
 
+    # Research & Tech Digest Settings
+    semantic_scholar_api_key: str = ""
+    papers_dir: str = "~/papers"
+    research_max_pdf_mb: int = 25
+    research_summary_max_chars: int = 12000
+    github_token: str = ""
+    digest_default_time: str = "07:00"
+    digest_max_items: int = 12
+    digest_seen_retention_days: int = 30
+    digest_hn_min_points: int = 100
+    digest_github_min_stars_today: int = 200
+
     def __init__(self, **kwargs: Any) -> None:
         # Load from .env file if present
         env_file_data = dotenv_values(".env") if os.path.exists(".env") else {}
@@ -110,6 +122,17 @@ class Settings:
         self.custom_skills_runner_timeout = int(
             get_val("custom_skills_runner_timeout", 15)
         )
+
+        self.semantic_scholar_api_key = str(get_val("semantic_scholar_api_key", "") or "")
+        self.papers_dir = str(get_val("papers_dir", "~/papers") or "~/papers")
+        self.research_max_pdf_mb = int(get_val("research_max_pdf_mb", 25))
+        self.research_summary_max_chars = int(get_val("research_summary_max_chars", 12000))
+        self.github_token = str(get_val("github_token", "") or "")
+        self.digest_default_time = str(get_val("digest_default_time", "07:00") or "07:00")
+        self.digest_max_items = int(get_val("digest_max_items", 12))
+        self.digest_seen_retention_days = int(get_val("digest_seen_retention_days", 30))
+        self.digest_hn_min_points = int(get_val("digest_hn_min_points", 100))
+        self.digest_github_min_stars_today = int(get_val("digest_github_min_stars_today", 200))
 
 
 # Global cached settings instance

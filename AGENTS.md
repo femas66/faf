@@ -62,6 +62,9 @@ faf-agent/
 │       ├── media_downloader.py # Unduh media via yt-dlp/aria2c dengan guard anti-SSRF
 │       ├── ocr.py            # OCR offline berbasis Tesseract
 │       ├── memory_mgr.py     # Tool kontrol memori permanen & knowledge graph
+│       ├── research_mgr.py   # Asisten riset paper (arXiv, Semantic Scholar, sitasi, perpustakaan)
+│       ├── tech_digest.py    # Digest harian berita siber & teknologi (HN, GitHub, RSS)
+│       ├── safe_http.py      # Helper HTTP anti-SSRF dengan batas ukuran & validasi redirect
 │       ├── python_repl.py    # In-memory Python REPL untuk kalkulasi rumit
 │       └── root_exec.py      # Fallback shell root (tsu/su) dengan konfirmasi keamanan
 └── tests/                    # Pengujian otomatis berbasis pytest & pytest-asyncio

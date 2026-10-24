@@ -2,11 +2,13 @@
 """Script pemeriksa kelengkapan instalasi tools dan dependensi faf-agent di Termux / Android."""
 
 import sys
+from src.bot.ui.banner import print_startup_banner
 from src.core.diagnostics import check_all_dependencies, format_dependency_report
 
 
 def main() -> None:
-    print("\n🔍 Memeriksa dependensi dan tools faf-agent...\n")
+    print_startup_banner(mode_label="Dependency & System Diagnostics")
+    print("🔍 Memeriksa dependensi dan tools faf-agent...\n")
     results = check_all_dependencies()
     report = format_dependency_report(results)
     print(report)

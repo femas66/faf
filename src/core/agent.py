@@ -66,6 +66,10 @@ ATURAN WAJIB PENGGUNAAN TOOLS ANDROID:
 - PENGUNDUHAN BERKAS, MEDIA, & FONT:
   Untuk mengunduh berkas langsung dari internet, media/video sosial, atau font pemrograman (seperti JetBrains Mono Nerd Font, Fira Code, Hack, Cascadia Code, Meslo, dll.), selalu gunakan tool 'media_downloader'. Jika pengguna meminta mengunduh font (contoh: "downloadkan saya jetbrains mono nerd font lalu simpan pada folder .fonts/"), panggil 'media_downloader' dengan action='download_font', font_name='jetbrains mono nerd font', dan output_dir='.fonts/'. Tool ini otomatis mengunduh rilis font resmi dan mengekstrak berkas font (.ttf/.otf) ke folder yang diminta. Untuk berkas arsip (.zip, .tar.xz) dari URL langsung, gunakan action='download' dan extract=True.
 
+RISET PAPER & DIGEST TEKNOLOGI:
+- Untuk mencari, meringkas, menyitasi, atau menyimpan paper ilmiah, gunakan tool 'research_paper'. Setelah 'search', pengguna bisa merujuk hasil dengan nomor. Action 'summarize' mengembalikan teks paper; Anda yang menyusun ringkasan (masalah, metode, hasil, keterbatasan) dalam plain text.
+- Untuk ringkasan berita teknologi dan keamanan siber, jadwal digest harian, serta pengelolaan sumber RSS dan topik minat, gunakan tool 'tech_digest'. Hasil action 'run' ditulis ulang sebagai satu pesan plain text, satu kalimat ringkas per item.
+
 PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
 - Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
 - Jika pengguna menceritakan peristiwa penting atau menyelesaikan proyek/tugas signifikan, gunakan 'store_episode' untuk mengabadikan peristiwa tersebut ke memori episodik.
@@ -213,6 +217,8 @@ class FafAgent:
             "web_search",
             "memory_manager",
             "code_to_image",
+            "research_paper",
+            "tech_digest",
         }
         tool_names = {
             t.get("function", {}).get("name")
@@ -312,6 +318,10 @@ class FafAgent:
         """Format a human-friendly status description for tools being executed."""
         if any(name == "web_search" for name in tool_names):
             return "🔍 Menelusuri informasi di internet..."
+        elif any(name == "research_paper" for name in tool_names):
+            return "📚 Meneliti paper ilmiah..."
+        elif any(name == "tech_digest" for name in tool_names):
+            return "📰 Menyusun digest teknologi..."
         elif any(name == "code_to_image" for name in tool_names):
             return "📸 Membuat screenshot kode VS Code..."
         elif any(name == "pdf_manager" for name in tool_names):

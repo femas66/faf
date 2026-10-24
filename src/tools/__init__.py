@@ -23,6 +23,8 @@ from src.tools.weather_mgr import WeatherForecastTool
 from src.tools.pdf_mgr import PDFManagerTool
 from src.tools.skill_maker import CreateCustomSkillTool
 from src.tools.code_to_image import CodeToImageTool
+from src.tools.research_mgr import ResearchPaperTool
+from src.tools.tech_digest import TechDigestTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -50,6 +52,8 @@ def create_default_registry() -> ToolRegistry:
     registry.register(MemoryManagerTool())
     registry.register(PythonReplTool())
     registry.register(CodeToImageTool())
+    registry.register(ResearchPaperTool())
+    registry.register(TechDigestTool())
     return registry
 
 
@@ -83,6 +87,8 @@ __all__ = [
     "MemoryManagerTool",
     "PythonReplTool",
     "CodeToImageTool",
+    "ResearchPaperTool",
+    "TechDigestTool",
     "create_default_registry",
     "default_registry",
 ]

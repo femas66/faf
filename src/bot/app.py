@@ -40,6 +40,7 @@ from src.bot.handlers.commands import (
     handle_skill_rollback,
 )
 from src.bot.handlers.chat import handle_chat_message
+from src.bot.ui.banner import print_startup_banner
 from src.tools.reminder_mgr import _default_worker
 from src.tools.cronjob_mgr import _default_cron_worker
 from src.core.android_bridge import bridge
@@ -210,6 +211,7 @@ def main() -> None:
         )
         sys.exit(1)
 
+    print_startup_banner(settings)
     logger.info("Initializing faf-agent Telegram Bot (Pure Python / Zero Maturin)...")
     app = create_application()
 

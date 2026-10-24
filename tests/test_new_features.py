@@ -280,3 +280,27 @@ async def test_protect_process(mock_context):
         assert res.success is True
         assert "PID 1234 berhasil diimunisasi" in res.output
         assert "-1000" in res.output
+
+
+def test_startup_banner_wide_and_compact():
+    import io
+    from src.bot.ui.banner import print_startup_banner, render_startup_banner
+    from src.config import Settings
+
+    cfg = Settings(openai_model="gpt-4o", allowed_telegram_user_ids=[12345])
+
+    wide = render_startup_banner(cfg, width=80, color=False)
+    assert "███████╗" in wide
+    assert "Autonomous Android AI Agent via Telegram" in wide
+    assert "gpt-4o" in wide
+    assert "1 whitelisted" in wide
+    assert "\033[" not in wide
+
+    compact = render_startup_banner(cfg, width=50, color=False)
+    assert "█▀▀ ▄▀█ █▀▀" in compact
+    assert "gpt-4o" in compact
+
+    buf = io.StringIO()
+    print_startup_banner(cfg, stream=buf, mode_label="Test Mode")
+    assert "Test Mode" in buf.getvalue()
+

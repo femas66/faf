@@ -16,6 +16,7 @@ CATEGORY_FILES = "files"
 CATEGORY_WEB_MEDIA = "web_media"
 CATEGORY_DEV_ADVANCED = "dev_advanced"
 CATEGORY_MEMORY = "memory"
+CATEGORY_RESEARCH = "research"
 CATEGORY_ALL = "all"
 
 TOOL_CLUSTERS: dict[str, set[str]] = {
@@ -55,6 +56,13 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
     },
     CATEGORY_MEMORY: {
         "memory_manager",
+        "ask_clarification",
+    },
+    CATEGORY_RESEARCH: {
+        "research_paper",
+        "tech_digest",
+        "pdf_manager",
+        "web_search",
         "ask_clarification",
     },
 }
@@ -152,6 +160,13 @@ MEMORY_KEYWORDS = {
     "graf pengetahuan", "knowledge graph", "relasi entitas", "episode", "riwayat tugas",
 }
 
+RESEARCH_KEYWORDS = {
+    "paper", "jurnal", "journal", "arxiv", "semantic scholar", "sitasi", "citation", "bibtex", "literatur",
+    "doi", "perpustakaan paper", "library paper", "referensi ilmiah", "publikasi ilmiah",
+    "digest", "tech digest", "berita teknologi", "berita tech", "berita siber", "tech news", "hacker news",
+    "github trending", "rss", "sumber rss", "topik digest", "ringkasan berita",
+}
+
 
 def _matches_any_keyword(text: str, keywords: set[str]) -> bool:
     """Check if text contains any of the given keywords or phrases safely."""
@@ -204,6 +219,8 @@ class ToolRouter:
             matched.add(CATEGORY_DEV_ADVANCED)
         if _matches_any_keyword(text, MEMORY_KEYWORDS):
             matched.add(CATEGORY_MEMORY)
+        if _matches_any_keyword(text, RESEARCH_KEYWORDS):
+            matched.add(CATEGORY_RESEARCH)
 
         # Context-aware fallback: check recent history if message is short or clarifying
         if history and len(history) > 1:
