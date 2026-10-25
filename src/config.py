@@ -60,6 +60,11 @@ class Settings:
     digest_hn_min_points: int = 100
     digest_github_min_stars_today: int = 200
 
+    # Browser Agent Settings
+    browser_idle_timeout: int = 180
+    browser_default_viewport: str = "desktop"
+    browser_max_elements: int = 40
+
     def __init__(self, **kwargs: Any) -> None:
         # Load from .env file if present
         env_file_data = dotenv_values(".env") if os.path.exists(".env") else {}
@@ -133,6 +138,12 @@ class Settings:
         self.digest_seen_retention_days = int(get_val("digest_seen_retention_days", 30))
         self.digest_hn_min_points = int(get_val("digest_hn_min_points", 100))
         self.digest_github_min_stars_today = int(get_val("digest_github_min_stars_today", 200))
+
+        self.browser_idle_timeout = int(get_val("browser_idle_timeout", 180))
+        self.browser_default_viewport = str(
+            get_val("browser_default_viewport", "desktop") or "desktop"
+        )
+        self.browser_max_elements = int(get_val("browser_max_elements", 40))
 
 
 # Global cached settings instance

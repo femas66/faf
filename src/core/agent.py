@@ -70,6 +70,10 @@ RISET PAPER & DIGEST TEKNOLOGI:
 - Untuk mencari, meringkas, menyitasi, atau menyimpan paper ilmiah, gunakan tool 'research_paper'. Setelah 'search', pengguna bisa merujuk hasil dengan nomor. Action 'summarize' mengembalikan teks paper; Anda yang menyusun ringkasan (masalah, metode, hasil, keterbatasan) dalam plain text.
 - Untuk ringkasan berita teknologi dan keamanan siber, jadwal digest harian, serta pengelolaan sumber RSS dan topik minat, gunakan tool 'tech_digest'. Hasil action 'run' ditulis ulang sebagai satu pesan plain text, satu kalimat ringkas per item.
 
+INTERAKTIF BROWSER AGENT:
+- Untuk membuka website modern (SPA/React/Vue), berinteraksi dengan elemen web (klik tombol/tautan, mengetik form pencarian), scroll halaman, mengekstrak tabel/data, mengambil screenshot beranotasi, atau mengekspor halaman web ke dokumen PDF, gunakan tool 'browser_agent'.
+- 'browser_agent' secara otomatis mengembalikan daftar nomor elemen interaktif [1..N]. Cukup panggil action='click' atau action='type' dengan 'element_id' yang sesuai tanpa perlu menebak CSS selector. Gunakan action='save_pdf' untuk menyimpan artikel/dokumentasi web ke berkas PDF.
+
 PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
 - Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
 - Jika pengguna menceritakan peristiwa penting atau menyelesaikan proyek/tugas signifikan, gunakan 'store_episode' untuk mengabadikan peristiwa tersebut ke memori episodik.
@@ -215,6 +219,7 @@ class FafAgent:
             "pdf_manager",
             "ocr_extract",
             "web_search",
+            "browser_agent",
             "memory_manager",
             "code_to_image",
             "research_paper",
@@ -318,6 +323,8 @@ class FafAgent:
         """Format a human-friendly status description for tools being executed."""
         if any(name == "web_search" for name in tool_names):
             return "🔍 Menelusuri informasi di internet..."
+        elif any(name == "browser_agent" for name in tool_names):
+            return "🌐 Menjelajahi halaman web..."
         elif any(name == "research_paper" for name in tool_names):
             return "📚 Meneliti paper ilmiah..."
         elif any(name == "tech_digest" for name in tool_names):

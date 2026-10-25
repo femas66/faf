@@ -532,6 +532,22 @@ class WebSearchTool(BaseTool):
         desc = page_data.get("description") or ""
         body = page_data.get("body") or ""
 
+        # Smart SPA Fallback jika konten statis kosong atau sangat pendek
+        if not body or len(body.strip()) < 150:
+            try:
+                from src.tools.cdp_client import _find_browser_binary
+                if _find_browser_binary():
+                    if context.on_status_update:
+                        await context.on_status_update("● Konten statis minim/SPA. Me-render via Headless Browser...")
+                    spa_data, spa_err = await self._fetch_via_headless_browser(raw_url)
+                    if not spa_err and spa_data.get("body") and spa_data["body"].strip():
+                        page_data = spa_data
+                        title = page_data.get("title") or title
+                        desc = page_data.get("description") or desc
+                        body = page_data.get("body") or ""
+            except Exception as e:
+                logger.debug("Error attempting headless SPA fallback in _action_visit: %s", e)
+
         if not body:
             return ToolResult(
                 success=True,
@@ -658,6 +674,17 @@ class WebSearchTool(BaseTool):
             await asyncio.sleep(random.uniform(0.1, 0.25))
 
             page_data, page_err = await self._fetch_page_content(target_url)
+            if (page_err or not page_data.get("body") or len(page_data.get("body", "").strip()) < 150):
+                try:
+                    from src.tools.cdp_client import _find_browser_binary
+                    if _find_browser_binary():
+                        spa_data, spa_err = await self._fetch_via_headless_browser(target_url)
+                        if not spa_err and spa_data.get("body") and spa_data["body"].strip():
+                            page_data = spa_data
+                            page_err = None
+                except Exception:
+                    pass
+
             if page_err or not page_data.get("body"):
                 compiled_findings.append(
                     f"{idx}. [{src['title']}]({target_url})\n"
@@ -1141,3 +1168,60 @@ class WebSearchTool(BaseTool):
             return {}, "Waktu tunggu habis saat membuka halaman (timeout)."
         except Exception as e:
             return {}, f"Kesalahan saat membuka halaman: {e}"
+
+    async def _fetch_via_headless_browser(self, url: str) -> tuple[dict[str, str], str | None]:
+        """Render SPA via headless Chromium (CDP or --dump-dom) to extract rendered text."""
+        try:
+            from src.tools.cdp_client import browser_session_manager, _find_browser_binary
+            if not _find_browser_binary():
+                return {}, "Browser binary tidak tersedia"
+            cdp = await browser_session_manager.get_cdp_client()
+            await cdp.send_command("Page.navigate", {"url": url})
+            await asyncio.sleep(2.5)
+            res = await cdp.send_command(
+                "Runtime.evaluate",
+                {
+                    "expression": "JSON.stringify({title: document.title || '', body: document.body ? document.body.innerText : ''})",
+                    "returnByValue": True,
+                },
+            )
+            val = res.get("result", {}).get("value")
+            if isinstance(val, str):
+                import json
+                parsed = json.loads(val)
+                return {"title": parsed.get("title", ""), "description": "", "body": parsed.get("body", "")}, None
+            elif isinstance(val, dict):
+                return {"title": val.get("title", ""), "description": "", "body": val.get("body", "")}, None
+        except Exception as e:
+            logger.debug("Headless browser CDP fallback failed: %s", e)
+
+        # Fallback to direct --dump-dom command if CDP failed
+        try:
+            from src.tools.cdp_client import _find_browser_binary
+            browser_bin = _find_browser_binary()
+            if not browser_bin:
+                return {}, "Browser binary tidak ditemukan"
+            host_rules = "MAP localhost 0.0.0.0, MAP 127.* 0.0.0.0, MAP 10.* 0.0.0.0, MAP 172.16.* 0.0.0.0, MAP 192.168.* 0.0.0.0, MAP 169.254.* 0.0.0.0"
+            proc = await asyncio.create_subprocess_exec(
+                browser_bin,
+                "--headless=new",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                f'--host-resolver-rules="{host_rules}"',
+                "--dump-dom",
+                url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            if stdout:
+                html_text = stdout.decode("utf-8", errors="replace")
+                extractor = SmartWebExtractor()
+                extractor.feed(html_text)
+                title, desc, body = extractor.get_clean_text()
+                return {"title": title, "description": desc, "body": body}, None
+        except Exception as e:
+            logger.debug("Headless browser --dump-dom fallback failed: %s", e)
+
+        return {}, "Gagal me-render halaman via headless browser."

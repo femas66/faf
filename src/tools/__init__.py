@@ -25,6 +25,7 @@ from src.tools.skill_maker import CreateCustomSkillTool
 from src.tools.code_to_image import CodeToImageTool
 from src.tools.research_mgr import ResearchPaperTool
 from src.tools.tech_digest import TechDigestTool
+from src.tools.browser_agent import BrowserAgentTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -54,6 +55,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(CodeToImageTool())
     registry.register(ResearchPaperTool())
     registry.register(TechDigestTool())
+    registry.register(BrowserAgentTool())
     return registry
 
 
@@ -89,6 +91,7 @@ __all__ = [
     "CodeToImageTool",
     "ResearchPaperTool",
     "TechDigestTool",
+    "BrowserAgentTool",
     "create_default_registry",
     "default_registry",
 ]

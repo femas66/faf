@@ -238,16 +238,16 @@ DEPENDENCY_REGISTRY: list[ToolDependency] = [
         is_critical=False,
         description="Dataset model bahasa Indonesia untuk akurasi pengenalan teks Tesseract",
     ),
-    # 9. Web Screenshot: Chromium
+    # 9. Web Screenshot & Browser Agent: Chromium
     ToolDependency(
         id="chromium",
         name="chromium (Headless Web Browser)",
-        tool_affected="web_screenshot",
+        tool_affected="web_screenshot, browser_agent",
         category="Web & Browser",
         check_fn=lambda: _check_binary(["chromium", "chromium-browser", "chrome"], "chromium --version"),
         install_command="pkg install x11-repo -y && pkg install chromium -y",
         is_critical=False,
-        description="Pengambil tangkapan layar website secara headless desktop/mobile",
+        description="Browser headless untuk web_screenshot & interaktif browser_agent (CDP, SPA, PDF)",
     ),
     # 10. Android Native CLI (pm, am, input, monkey)
     ToolDependency(

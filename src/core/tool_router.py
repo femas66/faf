@@ -38,6 +38,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
     },
     CATEGORY_WEB_MEDIA: {
         "web_search",
+        "browser_agent",
         "media_downloader",
         "web_screenshot",
         "ocr_extract",
@@ -61,6 +62,7 @@ TOOL_CLUSTERS: dict[str, set[str]] = {
     CATEGORY_RESEARCH: {
         "research_paper",
         "tech_digest",
+        "browser_agent",
         "pdf_manager",
         "web_search",
         "ask_clarification",
@@ -126,6 +128,7 @@ FILE_KEYWORDS = {
 WEB_MEDIA_KEYWORDS = {
     "cari web", "cari di web", "cari internet", "gugling", "googling", "riset",
     "web search", "search web", "browsing", "internet", "website", "url", "situs", "link", "tautan", "http", "https",
+    "browser", "browser agent", "buka web", "klik web", "klik tombol", "isi form", "web pdf", "simpan pdf web", "scroll web",
     "download", "unduh", "downloadkan", "mendownload", "mengunduh", "diunduh", "unduhkan",
     "unduh font", "download font", "downloadkan font",
     "font", "fonts", "nerd font", "nerdfont", "jetbrains", "fira code", "hack font", "cascadia",

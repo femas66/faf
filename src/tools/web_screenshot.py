@@ -13,6 +13,7 @@ from typing import Any
 from src.config import get_settings
 from src.core.android_bridge import bridge
 from src.tools.base import BaseTool, ToolContext, ToolResult
+from src.tools.web_search import _check_url_safety
 
 logger = logging.getLogger("faf_agent.tools.web_screenshot")
 
@@ -195,6 +196,14 @@ class WebScreenshotTool(BaseTool):
         except Exception:
             return ToolResult(success=False, output="", error=f"Alamat URL '{target_url}' tidak valid.")
 
+        is_safe, safety_msg, _ = _check_url_safety(target_url)
+        if not is_safe:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Akses ditolak karena URL tidak aman: {safety_msg}",
+            )
+
         device_type = kwargs.get("device_type", "desktop").lower().strip()
         if device_type not in ("desktop", "mobile"):
             device_type = "desktop"
@@ -245,6 +254,7 @@ class WebScreenshotTool(BaseTool):
             "--disable-dev-shm-usage",
             "--disable-software-rasterizer",
             "--hide-scrollbars",
+            '--host-resolver-rules="MAP localhost 0.0.0.0, MAP 127.* 0.0.0.0, MAP 10.* 0.0.0.0, MAP 172.16.* 0.0.0.0, MAP 192.168.* 0.0.0.0, MAP 169.254.* 0.0.0.0"',
             f"--window-size={int(width)},{int(height)}",
             f"--virtual-time-budget={int(virtual_time_budget_ms)}",
             "--run-all-compositor-stages-before-draw",
