@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import datetime
 import json
 import logging
 import os
@@ -9,10 +11,70 @@ import time
 from typing import Any
 
 from src.config import get_settings
-from src.core.android_bridge import bridge
+from src.core.android_bridge import CommandResult, bridge
 from src.tools.base import BaseTool, ToolContext, ToolResult
 
 logger = logging.getLogger("faf_agent.tools.productivity")
+
+_AM_ERROR_PATTERNS = (
+    "error:",
+    "unable to resolve intent",
+    "permission denial",
+    "securityexception",
+    "does not exist",
+)
+
+
+def _check_am_intent_error(res: CommandResult) -> str | None:
+    """Periksa apakah eksekusi `am start` mengalami kegagalan intent Android."""
+    combined = "\n".join(p.strip() for p in (res.stdout, res.stderr) if p and p.strip())
+    low = combined.lower()
+    if not res.success:
+        return combined or f"Perintah keluar dengan kode {res.returncode}."
+    for pat in _AM_ERROR_PATTERNS:
+        if pat in low:
+            return combined
+    if "activity not started" in low and "delivered to currently running" not in low:
+        return combined
+    return None
+
+
+def _compute_seconds_until_alarm(
+    hour: int,
+    minutes: int,
+    now: datetime.datetime | None = None,
+) -> int:
+    """Hitung selisih detik menuju jam:menit berikutnya."""
+    current = now or datetime.datetime.now().astimezone()
+    target = current.replace(hour=hour, minute=minutes, second=0, microsecond=0)
+    if target <= current:
+        target += datetime.timedelta(days=1)
+    return max(1, int((target - current).total_seconds()))
+
+
+async def trigger_physical_alarm(label: str, time_str: str) -> CommandResult:
+    """Bunyikan alarm fisik langsung dari Termux (getar, notifikasi suara prioritas, TTS, & nada alarm)."""
+    safe_title = shlex.quote(f"⏰ ALARM ({time_str})")
+    safe_label = shlex.quote(str(label))
+    tts_text = shlex.quote(
+        f"Perhatian. Alarm pukul {time_str}. {label}. Alarm pukul {time_str}. {label}."
+    )
+    cmd = (
+        "termux-wake-lock 2>/dev/null || true; "
+        "input keyevent KEYCODE_WAKEUP 2>/dev/null || true; "
+        "termux-volume alarm 13 2>/dev/null || true; "
+        "termux-volume music 12 2>/dev/null || true; "
+        f"termux-notification -i faf_alarm -t {safe_title} -c {safe_label} "
+        "--priority max --sound --vibrate 1000,500,1000,500,1000 2>/dev/null || true; "
+        "termux-vibrate -f -d 3000 2>/dev/null || true; "
+        "for f in /system/media/audio/alarms/*.ogg /system/media/audio/alarms/*.mp3 "
+        "/system/media/audio/ringtones/*.ogg; do "
+        '[ -f "$f" ] && termux-media-player play "$f" 2>/dev/null && break; '
+        "done; "
+        f"termux-tts-speak {tts_text} 2>/dev/null || true"
+    )
+    return await bridge.execute_shell(cmd, as_root=bridge.is_root_available())
+
 
 
 class ProductivityControlTool(BaseTool):
@@ -124,6 +186,39 @@ class ProductivityControlTool(BaseTool):
         "required": ["action"],
     }
 
+    def __init__(self) -> None:
+        self._active_alarm_tasks: dict[str, asyncio.Task[Any]] = {}
+
+    def _schedule_physical_alarm_fallback(
+        self,
+        key: str,
+        delay_seconds: int,
+        label: str,
+        time_str: str,
+    ) -> asyncio.Task[Any] | None:
+        """Jadwalkan pemicu alarm fisik di background saat berjalan di Termux Android."""
+        if not bridge.is_android_termux:
+            return None
+
+        old_task = self._active_alarm_tasks.pop(key, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def _runner() -> None:
+            try:
+                await asyncio.sleep(delay_seconds)
+                await trigger_physical_alarm(label=label, time_str=time_str)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Gagal membunyikan fallback alarm fisik ({key}): {e}")
+            finally:
+                self._active_alarm_tasks.pop(key, None)
+
+        task = asyncio.create_task(_runner())
+        self._active_alarm_tasks[key] = task
+        return task
+
     async def execute(self, context: ToolContext, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action", "").lower().strip()
         settings = get_settings()
@@ -142,17 +237,83 @@ class ProductivityControlTool(BaseTool):
             if hour is None:
                 return ToolResult(success=False, output="", error="Parameter 'hour' (0-23) wajib disertakan.")
 
-            cmd = (
-                f"am start -a android.intent.action.SET_ALARM "
-                f"--ei android.intent.extra.hour {int(hour)} "
-                f"--ei android.intent.extra.minutes {int(minutes)} "
+            try:
+                h = int(hour)
+                m = int(minutes)
+            except (TypeError, ValueError):
+                return ToolResult(success=False, output="", error="Parameter 'hour' dan 'minutes' harus berupa angka bulat.")
+
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="Rentang waktu tidak valid. Gunakan hour (0-23) dan minutes (0-59).",
+                )
+
+            use_root = bridge.is_root_available()
+            intent_cmd = (
+                f"am start {'--user 0 ' if use_root else ''}-a android.intent.action.SET_ALARM "
+                f"--ei android.intent.extra.hour {h} "
+                f"--ei android.intent.extra.minutes {m} "
                 f"--es android.intent.extra.message {shlex.quote(str(msg))} "
-                f"--ez android.intent.extra.skip_ui true"
+                f"--ez android.intent.extra.skip_ui true "
+                f"--ez android.intent.extra.vibrate true"
             )
-            res = await bridge.execute_shell(cmd)
+            if use_root:
+                cmd = (
+                    "input keyevent KEYCODE_WAKEUP 2>/dev/null || true; "
+                    "cmd media_session volume --stream 4 --set 12 2>/dev/null || "
+                    "termux-volume alarm 12 2>/dev/null || true; "
+                    f"{intent_cmd}"
+                )
+            else:
+                cmd = f"termux-volume alarm 12 2>/dev/null || true; {intent_cmd}"
+
+            res = await bridge.execute_shell(cmd, as_root=use_root)
+            err = _check_am_intent_error(res)
+            if err and use_root:
+                fallback_cmd = (
+                    f"am start -a android.intent.action.SET_ALARM "
+                    f"--ei android.intent.extra.hour {h} "
+                    f"--ei android.intent.extra.minutes {m} "
+                    f"--es android.intent.extra.message {shlex.quote(str(msg))} "
+                    f"--ez android.intent.extra.skip_ui true "
+                    f"--ez android.intent.extra.vibrate true"
+                )
+                res = await bridge.execute_shell(fallback_cmd, as_root=False)
+                err = _check_am_intent_error(res)
+
+            time_str = f"{h:02d}:{m:02d}"
+            delay_sec = _compute_seconds_until_alarm(h, m)
+            self._schedule_physical_alarm_fallback(
+                key=f"alarm_{h:02d}_{m:02d}",
+                delay_seconds=delay_sec,
+                label=str(msg),
+                time_str=time_str,
+            )
+
+            if err:
+                if bridge.is_android_termux:
+                    return ToolResult(
+                        success=True,
+                        output=(
+                            f"Aplikasi Jam bawaan menolak intent SET_ALARM ({err}), "
+                            f"tetapi alarm fisik cadangan faf-agent (getar, nada alarm, & suara TTS) "
+                            f"telah diaktifkan untuk pukul {time_str} dengan label '{msg}'."
+                        ),
+                    )
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal memasang alarm di aplikasi Jam Android: {err}",
+                )
+
             return ToolResult(
                 success=True,
-                output=f"Alarm berhasil dipasang untuk pukul {int(hour):02d}:{int(minutes):02d} dengan label '{msg}'.",
+                output=(
+                    f"Alarm berhasil dipasang untuk pukul {time_str} dengan label '{msg}' "
+                    f"(volume alarm diaktifkan & pengaman bunyi fisik siap)."
+                ),
             )
 
         # -------------------------------------------------------------------
@@ -165,19 +326,59 @@ class ProductivityControlTool(BaseTool):
             if seconds is None:
                 return ToolResult(success=False, output="", error="Parameter 'seconds' wajib disertakan.")
 
-            cmd = (
-                f"am start -a android.intent.action.SET_TIMER "
-                f"--ei android.intent.extra.length {int(seconds)} "
+            try:
+                sec_int = int(seconds)
+            except (TypeError, ValueError):
+                return ToolResult(success=False, output="", error="Parameter 'seconds' harus berupa angka bulat.")
+
+            if sec_int <= 0:
+                return ToolResult(success=False, output="", error="Durasi timer harus lebih dari 0 detik.")
+
+            use_root = bridge.is_root_available()
+            intent_cmd = (
+                f"am start {'--user 0 ' if use_root else ''}-a android.intent.action.SET_TIMER "
+                f"--ei android.intent.extra.length {sec_int} "
                 f"--es android.intent.extra.message {shlex.quote(str(msg))} "
                 f"--ez android.intent.extra.skip_ui true"
             )
-            res = await bridge.execute_shell(cmd)
-            mins = seconds // 60
-            secs = seconds % 60
+            if use_root:
+                cmd = f"input keyevent KEYCODE_WAKEUP 2>/dev/null || true; {intent_cmd}"
+            else:
+                cmd = intent_cmd
+
+            res = await bridge.execute_shell(cmd, as_root=use_root)
+            err = _check_am_intent_error(res)
+            if err and use_root:
+                res = await bridge.execute_shell(
+                    f"am start -a android.intent.action.SET_TIMER "
+                    f"--ei android.intent.extra.length {sec_int} "
+                    f"--es android.intent.extra.message {shlex.quote(str(msg))} "
+                    f"--ez android.intent.extra.skip_ui true",
+                    as_root=False,
+                )
+                err = _check_am_intent_error(res)
+
+            mins = sec_int // 60
+            secs = sec_int % 60
             dur_str = f"{mins} menit {secs} detik" if mins > 0 else f"{secs} detik"
+
+            self._schedule_physical_alarm_fallback(
+                key=f"timer_{int(time.time())}",
+                delay_seconds=sec_int,
+                label=str(msg),
+                time_str=dur_str,
+            )
+
+            if err and not bridge.is_android_termux:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Gagal memasang timer di aplikasi Jam Android: {err}",
+                )
+
             return ToolResult(
                 success=True,
-                output=f"Timer hitung mundur berhasil dipasang selama {seconds} detik ({dur_str}) ('{msg}').",
+                output=f"Timer hitung mundur berhasil dipasang selama {sec_int} detik ({dur_str}) ('{msg}').",
             )
 
         # -------------------------------------------------------------------

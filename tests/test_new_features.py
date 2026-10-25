@@ -304,3 +304,62 @@ def test_startup_banner_wide_and_compact():
     print_startup_banner(cfg, stream=buf, mode_label="Test Mode")
     assert "Test Mode" in buf.getvalue()
 
+
+@pytest.mark.asyncio
+async def test_set_alarm_root_and_error_handling(mock_context):
+    from src.tools.productivity import (
+        ProductivityControlTool,
+        _check_am_intent_error,
+        _compute_seconds_until_alarm,
+        trigger_physical_alarm,
+    )
+    import datetime
+
+    tool = ProductivityControlTool()
+
+    # 1. Invalid hour/minutes rejected
+    bad_range = await tool.execute(mock_context, action="set_alarm", hour=25, minutes=0)
+    assert bad_range.success is False
+    assert "Rentang waktu" in bad_range.error
+
+    # 2. Root execution with KEYCODE_WAKEUP & --user 0
+    with patch("src.tools.productivity.bridge.is_root_available", return_value=True), \
+         patch.object(
+             type(tool), "_schedule_physical_alarm_fallback", return_value=None
+         ), \
+         patch("src.tools.productivity.bridge.execute_shell", new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mk_res(stdout="Starting: Intent { act=android.intent.action.SET_ALARM }")
+        res = await tool.execute(mock_context, action="set_alarm", hour=6, minutes=15, message="Kuliah Pagi")
+        assert res.success is True
+        assert "06:15" in res.output
+        called_cmd = mock_exec.call_args[0][0]
+        assert "--user 0" in called_cmd
+        assert "KEYCODE_WAKEUP" in called_cmd
+        assert mock_exec.call_args[1].get("as_root") is True
+
+    # 3. Intent error detected when am start fails (and not on Termux fallback)
+    with patch("src.tools.productivity.bridge.is_root_available", return_value=False), \
+         patch("src.tools.productivity.bridge._is_termux_cached", False), \
+         patch("src.tools.productivity.bridge.execute_shell", new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mk_res(
+            stdout="Error: Activity not started, unable to resolve Intent",
+            returncode=0,
+        )
+        res_fail = await tool.execute(mock_context, action="set_alarm", hour=6, minutes=15)
+        assert res_fail.success is False
+        assert "unable to resolve Intent" in res_fail.error
+
+    # 4. Compute seconds until alarm & physical alarm trigger
+    now = datetime.datetime(2026, 10, 25, 6, 0, 0).astimezone()
+    assert _compute_seconds_until_alarm(6, 15, now=now) == 900
+    assert _check_am_intent_error(mk_res(stdout="Starting: Intent")) is None
+
+    with patch("src.tools.productivity.bridge.is_root_available", return_value=True), \
+         patch("src.tools.productivity.bridge.execute_shell", new_callable=AsyncMock) as mock_ring:
+        mock_ring.return_value = mk_res(stdout="ok")
+        ring_res = await trigger_physical_alarm("Bangun", "06:15")
+        assert ring_res.success is True
+        assert "termux-vibrate" in mock_ring.call_args[0][0]
+        assert "termux-tts-speak" in mock_ring.call_args[0][0]
+
+
