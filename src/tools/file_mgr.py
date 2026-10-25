@@ -112,6 +112,7 @@ class FileManagerTool(BaseTool):
                     "checksum",
                     "tree",
                     "extract_archive",
+                    "send_file",
                 ],
                 "description": (
                     "Aksi operasi berkas yang diinginkan: "
@@ -130,7 +131,8 @@ class FileManagerTool(BaseTool):
                     "'make_dir' (buat folder baru beserta induknya jika belum ada), "
                     "'checksum' (hitung hash MD5, SHA1, SHA256 file), "
                     "'tree' (tampilkan struktur pohon direktori hierarkis), "
-                    "'extract_archive' (ekstrak file arsip .zip / .tar.xz / .tar.gz ke destination_path)."
+                    "'extract_archive' (ekstrak file arsip .zip / .tar.xz / .tar.gz ke destination_path), "
+                    "'send_file' (mengirimkan berkas apapun dari penyimpanan HP langsung ke chat Telegram sebagai dokumen atau foto)."
                 ),
             },
             "path": {
@@ -1235,6 +1237,64 @@ class FileManagerTool(BaseTool):
             except Exception as e:
                 return ToolResult(success=False, output="", error=f"Gagal mengekstrak arsip: {e}")
 
+        # -------------------------------------------------------------------
+        # 17. Action: SEND_FILE (Send file to Telegram chat)
+        # -------------------------------------------------------------------
+        elif action in ("send_file", "send_document"):
+            raw_path = kwargs.get("path")
+            if not raw_path:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="Parameter 'path' wajib diisi untuk action 'send_file'.",
+                )
+
+            target = _resolve_safe_path(str(raw_path))
+            from src.tools.path_security import validate_path
+            ok, msg, validated_p = validate_path(
+                target,
+                check_credentials=True,
+                check_protected=True,
+            )
+            if not ok or not validated_p:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Akses berkas ditolak: {msg}",
+                )
+
+            if not validated_p.exists():
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Berkas '{raw_path}' tidak ditemukan di lokasi: {validated_p}",
+                )
+
+            if validated_p.is_dir():
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Path '{raw_path}' adalah direktori. Hanya berkas yang dapat dikirimkan ke Telegram.",
+                )
+
+            file_size = validated_p.stat().st_size
+            if file_size > 50 * 1024 * 1024:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Ukuran berkas ({_format_size(file_size)}) melebihi batas maksimal pengiriman dokumen Telegram Bot (50 MB).",
+                )
+
+            ext = validated_p.suffix.lower()
+            media_type = "photo" if ext in (".jpg", ".jpeg", ".png", ".webp") else "document"
+
+            return ToolResult(
+                success=True,
+                output=f"Berkas '{validated_p.name}' ({_format_size(file_size)}) berhasil disiapkan dan dikirimkan ke chat Telegram.",
+                media_path=str(validated_p.resolve()),
+                media_type=media_type,
+            )
+
         else:
             return ToolResult(
                 success=False,
@@ -1242,6 +1302,6 @@ class FileManagerTool(BaseTool):
                 error=(
                     f"Aksi '{action}' tidak dikenal. Aksi yang didukung: read, write, append, "
                     f"edit_lines, insert_lines, find_replace, delete, file_info, list_dir, "
-                    f"search_text, copy, move, make_dir, checksum, tree, extract_archive."
+                    f"search_text, copy, move, make_dir, checksum, tree, extract_archive, send_file."
                 ),
             )

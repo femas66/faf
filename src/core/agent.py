@@ -74,6 +74,10 @@ INTERAKTIF BROWSER AGENT:
 - Untuk membuka website modern (SPA/React/Vue), berinteraksi dengan elemen web (klik tombol/tautan, mengetik form pencarian), scroll halaman, mengekstrak tabel/data, mengambil screenshot beranotasi, atau mengekspor halaman web ke dokumen PDF, gunakan tool 'browser_agent'.
 - 'browser_agent' secara otomatis mengembalikan daftar nomor elemen interaktif [1..N]. Cukup panggil action='click' atau action='type' dengan 'element_id' yang sesuai tanpa perlu menebak CSS selector. Gunakan action='save_pdf' untuk menyimpan artikel/dokumentasi web ke berkas PDF.
 
+PENGIRIMAN BERKAS & DOKUMEN PDF KE TELEGRAM:
+- Untuk mengirimkan berkas PDF yang ada di penyimpanan ponsel ke chat Telegram, gunakan tool 'pdf_manager' dengan action='send_document' dan sertakan 'path' berkas PDF tersebut. Berkas PDF akan langsung dikirimkan sebagai lampiran dokumen di Telegram.
+- Untuk mengirimkan berkas umum lainnya (non-PDF atau berkas apapun seperti gambar, txt, zip, csv) dari penyimpanan ponsel ke chat Telegram, gunakan tool 'file_manager' dengan action='send_file'.
+
 PANDUAN PEMBELAJARAN & MEMORI OTOMATIS:
 - Jika pengguna memberitahukan fakta baru tentang dirinya (nama, panggilan, preferensi, makanan/kopi favorit, rutinitas, jam tidur/bangun, aturan khusus) atau detail perangkatnya, Anda WAJIB memanggil tool 'memory_manager' action='store' untuk menyimpannya ke memori permanen.
 - Jika pengguna menceritakan peristiwa penting atau menyelesaikan proyek/tugas signifikan, gunakan 'store_episode' untuk mengabadikan peristiwa tersebut ke memori episodik.
@@ -332,7 +336,7 @@ class FafAgent:
         elif any(name == "code_to_image" for name in tool_names):
             return "📸 Membuat screenshot kode VS Code..."
         elif any(name == "pdf_manager" for name in tool_names):
-            return "⏳ Sedang membaca dokumen PDF..."
+            return "📄 Memproses berkas PDF..."
         elif any(name == "ocr_extract" for name in tool_names):
             return "🔍 Memproses teks dari gambar (OCR)..."
         elif any(name == "media_downloader" for name in tool_names):

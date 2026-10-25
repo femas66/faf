@@ -271,6 +271,42 @@ async def test_file_manager_extract_archive(mock_context, tmp_path):
     assert os.path.exists(os.path.join(extract_target, "main.py"))
 
 
+@pytest.mark.asyncio
+async def test_file_manager_send_file_document(mock_context, tmp_path):
+    tool = FileManagerTool()
+    doc_path = tmp_path / "laporan_keuangan.pdf"
+    doc_path.write_bytes(b"%PDF-1.4 test content")
+
+    res = await tool.execute(mock_context, action="send_file", path=str(doc_path))
+    assert res.success is True
+    assert res.media_path == str(doc_path.resolve())
+    assert res.media_type == "document"
+    assert "laporan_keuangan.pdf" in res.output
+
+
+@pytest.mark.asyncio
+async def test_file_manager_send_file_photo(mock_context, tmp_path):
+    tool = FileManagerTool()
+    img_path = tmp_path / "diagram.png"
+    img_path.write_bytes(b"\x89PNG\r\n\x1a\n...")
+
+    res = await tool.execute(mock_context, action="send_file", path=str(img_path))
+    assert res.success is True
+    assert res.media_path == str(img_path.resolve())
+    assert res.media_type == "photo"
+
+
+@pytest.mark.asyncio
+async def test_file_manager_send_file_directory_rejected(mock_context, tmp_path):
+    tool = FileManagerTool()
+    folder_path = tmp_path / "my_folder"
+    folder_path.mkdir()
+
+    res = await tool.execute(mock_context, action="send_file", path=str(folder_path))
+    assert res.success is False
+    assert "adalah direktori" in res.error.lower()
+
+
 # ---------------------------------------------------------------------------
 # 6. Tool Router Classification Tests
 # ---------------------------------------------------------------------------
@@ -299,3 +335,8 @@ def test_tool_router_font_download_phrases():
     tools4 = tool_router.get_tool_names(phrase4)
     assert "file_manager" in tools4
     assert "media_downloader" in tools4
+
+    # Send file / PDF phrases
+    phrase5 = "tolong kirimkan file pdf skripsi.pdf dari hp ke telegram"
+    tools5 = tool_router.get_tool_names(phrase5)
+    assert "pdf_manager" in tools5 or "file_manager" in tools5

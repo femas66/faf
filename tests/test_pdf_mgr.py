@@ -330,3 +330,51 @@ async def test_telegram_document_upload_handling(temp_docs_dir, monkeypatch):
         reply_call_text = mock_message_nocap.reply_text.call_args[0][0]
         assert "test_research.pdf" in reply_call_text
         assert "perpustakaan dokumen" in reply_call_text
+
+
+@pytest.mark.asyncio
+async def test_pdf_manager_send_document_success(temp_docs_dir, mock_context):
+    tool = PDFManagerTool()
+    pdf_file = temp_docs_dir / "skripsi_faf.pdf"
+    create_sample_pdf(str(pdf_file), ["Bab 1: Pendahuluan sistem AI."])
+
+    res = await tool.execute(mock_context, action="send_document", path="skripsi_faf.pdf")
+    assert res.success is True
+    assert res.media_path is not None
+    assert res.media_path == str(pdf_file.resolve())
+    assert res.media_type == "document"
+    assert "skripsi_faf.pdf" in res.output
+    assert "berhasil disiapkan dan dikirimkan" in res.output
+
+
+@pytest.mark.asyncio
+async def test_pdf_manager_send_document_not_found(temp_docs_dir, mock_context):
+    tool = PDFManagerTool()
+    res = await tool.execute(mock_context, action="send_document", path="dokumen_hilang.pdf")
+    assert res.success is False
+    assert "tidak ditemukan" in res.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_pdf_manager_send_document_oversized(temp_docs_dir, mock_context):
+    tool = PDFManagerTool()
+    pdf_file = temp_docs_dir / "huge_doc.pdf"
+    create_sample_pdf(str(pdf_file), ["Konten besar."])
+
+    orig_stat = pathlib.Path.stat
+
+    def custom_stat(self, *args, **kwargs):
+        res = orig_stat(self, *args, **kwargs)
+        if "huge_doc.pdf" in str(self):
+            mock_res = MagicMock(wraps=res)
+            mock_res.st_size = 60 * 1024 * 1024
+            mock_res.st_mode = res.st_mode
+            return mock_res
+        return res
+
+    with patch.object(pathlib.Path, "stat", custom_stat):
+        res = await tool.execute(mock_context, action="send_document", path="huge_doc.pdf")
+        assert res.success is False
+        assert "melebihi batas" in res.error.lower()
+
+

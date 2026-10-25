@@ -136,8 +136,8 @@ class PDFManagerTool(BaseTool):
     description = (
         "Pengelola dan pembaca dokumen PDF cerdas. Gunakan tool ini untuk melihat daftar dokumen PDF "
         "yang tersimpan di perpustakaan ('list_documents'), mencari topik/kata kunci di seluruh atau dokumen "
-        "tertentu ('search_text'), membaca teks dari halaman tertentu ('read_pages'), dan memeriksa informasi/struktur "
-        "dokumen ('get_info')."
+        "tertentu ('search_text'), membaca teks dari halaman tertentu ('read_pages'), memeriksa informasi/struktur "
+        "dokumen ('get_info'), dan mengirimkan berkas PDF dari HP ke chat Telegram ('send_document')."
     )
 
     parameters = {
@@ -145,14 +145,15 @@ class PDFManagerTool(BaseTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list_documents", "get_info", "search_text", "read_pages", "extract_tables"],
+                "enum": ["list_documents", "get_info", "search_text", "read_pages", "extract_tables", "send_document"],
                 "description": (
                     "Aksi yang akan dilakukan: "
                     "'list_documents' (melihat berkas PDF yang ada), "
                     "'search_text' (mencari kata kunci/topik dalam dokumen), "
                     "'read_pages' (membaca teks halaman tertentu), "
                     "'get_info' (informasi metadata dan jumlah halaman), "
-                    "'extract_tables' (ekstraksi tabel)."
+                    "'extract_tables' (ekstraksi tabel), "
+                    "'send_document' (mengirimkan berkas PDF dari penyimpanan HP langsung ke chat Telegram sebagai dokumen)."
                 ),
             },
             "path": {
@@ -492,8 +493,48 @@ class PDFManagerTool(BaseTool):
                 logger.exception(f"Error extracting tables: {e}")
                 return ToolResult(success=False, output="", error=f"Gagal mengekstrak tabel: {str(e)}")
 
+        # -------------------------------------------------------------------
+        # 6. Action: SEND_DOCUMENT (Send PDF to Telegram)
+        # -------------------------------------------------------------------
+        elif action in ("send_document", "send_pdf"):
+            path_arg = kwargs.get("path")
+            if not path_arg:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="Parameter 'path' (nama berkas atau path lengkap PDF) wajib diisi untuk action 'send_document'.",
+                )
+
+            is_valid, resolved_path, err_msg = _resolve_pdf_path(str(path_arg))
+            if not is_valid:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=err_msg,
+                )
+
+            pdf_file = pathlib.Path(resolved_path)
+            file_size_bytes = pdf_file.stat().st_size
+            if file_size_bytes > 50 * 1024 * 1024:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=(
+                        f"Ukuran berkas PDF ({_format_size(file_size_bytes)}) melebihi batas "
+                        "maksimal pengiriman dokumen Telegram Bot (50 MB)."
+                    ),
+                )
+
+            size_str = _format_size(file_size_bytes)
+            return ToolResult(
+                success=True,
+                output=f"Berkas PDF '{pdf_file.name}' ({size_str}) berhasil disiapkan dan dikirimkan ke chat Telegram.",
+                media_path=str(pdf_file.resolve()),
+                media_type="document",
+            )
+
         return ToolResult(
             success=False,
             output="",
-            error=f"Aksi '{action}' tidak dikenali. Pilih: 'list_documents', 'get_info', 'search_text', 'read_pages', 'extract_tables'.",
+            error=f"Aksi '{action}' tidak dikenali. Pilih: 'list_documents', 'get_info', 'search_text', 'read_pages', 'extract_tables', 'send_document'.",
         )

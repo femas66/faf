@@ -119,6 +119,7 @@ FILE_KEYWORDS = {
     "py", "go", "php", "sql", "html", "css", "js", "ts", "sh", "rs", "cpp", "java",
     "baca file", "tulis file", "edit file", "hapus file", "cari file", "buat file",
     "simpan file", "salin file", "pindah file", "list file", "baca pdf", "cari teks",
+    "kirim file", "kirim berkas", "kirim pdf", "send file", "kirim dokumen", "kirimkan file", "kirimkan pdf", "kirimkan berkas", "kirimkan dokumen",
     "/sdcard", "/data", "/storage", "~/", "documents", "download",
     "downloadkan", "mendownload", "unduh", "mengunduh", "diunduh", "unduhkan",
     "font", "fonts", "nerd font", "nerdfont", "jetbrains", "fira code", "hack font", "cascadia",
